@@ -296,6 +296,97 @@ void saveConfig() {
     WritePrivateProfileStringW(L"Config", L"AnnotationHoldMs", std::to_wstring(g_config.annotationHoldMs).c_str(), ini.c_str());
 }
 
+// ------------------------------------------------------------------
+// 更多预设主题表：每个主题一行数据，想再加新预设，只需照着复制一行即可。
+// 字段顺序见下方 ThemePreset 结构体。颜色用 RGB(红, 绿, 蓝)，范围 0~255。
+// ------------------------------------------------------------------
+struct ThemePreset {
+    const wchar_t* name;                     // 下拉框里显示的名字
+    int radius;                              // 点击波纹最大半径 15~90
+    int duration;                            // 点击波纹时长 150~750 ms
+    int thickness;                           // 圈线粗细 1~5
+    int rings;                               // 圈数 1~3
+    int alpha;                               // 点击波纹不透明度 0~255
+    bool centerDot;                          // 中心触点闪光
+    COLORREF left, right, middle;            // 左键 / 右键 / 中键 颜色
+    bool ambient;                            // 常驻呼吸圈开关
+    int ambRadius;                           // 常驻圈半径 10~45
+    int ambThickness;                        // 常驻圈粗细 1~6
+    int ambPercent;                          // 常驻圈透明度 0~100 %
+    COLORREF ambColor;                       // 常驻圈颜色
+    bool trail;                              // 拖尾开关
+    COLORREF trailColor;                     // 拖尾颜色
+    int trailDuration;                       // 拖尾留存 150~800 ms
+    int trailWidth;                          // 拖尾粗细 3~18 px
+    int trailPercent;                        // 拖尾透明度 10~100 %
+};
+
+const ThemePreset kThemes[] = {
+    { L"🌸 樱花粉 (柔和/淡雅/少女心)",
+      40, 480, 2, 2, 170, true,  RGB(255,126,170), RGB(190,140,255), RGB(255,190,120),
+      true, 24, 2, 35, RGB(255,170,200),
+      true, RGB(255,120,170), 420, 9, 75 },
+
+    { L"🔥 烈焰火花 (炽热/高对比)",
+      46, 420, 3, 3, 210, true,  RGB(255,87,34),   RGB(255,193,7),   RGB(255,235,59),
+      true, 22, 2, 35, RGB(255,120,50),
+      true, RGB(255,94,20),   360, 11, 85 },
+
+    { L"💜 霓虹赛博 (青紫洋红/科技感)",
+      36, 380, 2, 2, 220, true,  RGB(0,229,255),   RGB(224,64,251),  RGB(118,255,3),
+      true, 20, 2, 45, RGB(0,229,255),
+      true, RGB(224,64,251),  400, 8, 85 },
+
+    { L"🌿 森林薄荷 (清新/自然)",
+      38, 500, 2, 2, 170, true,  RGB(46,204,113),  RGB(26,188,156),  RGB(241,196,15),
+      true, 22, 2, 30, RGB(39,174,96),
+      true, RGB(46,204,113),  420, 8, 75 },
+
+    { L"🌅 日落晚霞 (暖橙/紫红)",
+      48, 560, 3, 3, 185, true,  RGB(255,138,76),  RGB(171,71,188),  RGB(255,213,79),
+      true, 26, 2, 30, RGB(240,98,146),
+      true, RGB(255,112,67),  460, 10, 78 },
+
+    { L"🧊 冰蓝晶莹 (清冷/通透)",
+      44, 520, 2, 3, 175, true,  RGB(79,195,247),  RGB(100,120,255), RGB(38,198,218),
+      true, 24, 2, 30, RGB(120,190,230),
+      true, RGB(66,165,245),  440, 8, 75 },
+
+    { L"⚡ 闪电极速 (超快/干脆利落)",
+      24, 160, 2, 1, 230, true,  RGB(255,214,0),   RGB(0,200,255),   RGB(255,64,129),
+      true, 16, 2, 25, RGB(255,214,0),
+      true, RGB(255,214,0),   200, 6, 85 },
+
+    { L"🎬 录屏教学 (大圈/醒目/观众看得清)",
+      62, 650, 4, 2, 235, true,  RGB(255,59,48),   RGB(0,122,255),   RGB(255,204,0),
+      true, 30, 3, 55, RGB(255,204,0),
+      true, RGB(255,149,0),   500, 14, 90 },
+
+    { L"⚪ 极简黑白 (克制/低干扰，无拖尾无常驻圈)",
+      22, 240, 1, 1, 150, false, RGB(60,60,60),    RGB(110,110,110), RGB(160,160,160),
+      false, 18, 1, 20, RGB(120,120,120),
+      false, RGB(80,80,80),   300, 4, 50 },
+};
+
+constexpr int kThemeCount = static_cast<int>(sizeof(kThemes) / sizeof(kThemes[0]));
+constexpr int PRESET_THEME_FIRST = 3;        // 旧的 0/1/2 保持不变，新主题从 3 开始，老用户的 ini 不受影响
+
+// 下拉框顺序：Wacom、水波涟漪、各新主题……、最后是“自定义”
+int comboIndexToPreset(int idx) {
+    if (idx == 0) return PRESET_WACOM;
+    if (idx == 1) return PRESET_WATER_RIPPLE;
+    if (idx >= 2 && idx < 2 + kThemeCount) return PRESET_THEME_FIRST + (idx - 2);
+    return PRESET_CUSTOM;
+}
+
+int presetToComboIndex(int preset) {
+    if (preset == PRESET_WACOM) return 0;
+    if (preset == PRESET_WATER_RIPPLE) return 1;
+    if (preset >= PRESET_THEME_FIRST && preset < PRESET_THEME_FIRST + kThemeCount)
+        return 2 + (preset - PRESET_THEME_FIRST);
+    return 2 + kThemeCount;                  // 自定义排最后
+}
+
 void applyPreset(int preset) {
     g_config.stylePreset = preset;
     if (preset == PRESET_WACOM) {
@@ -331,6 +422,30 @@ void applyPreset(int preset) {
         g_config.trailWidth = 10;
         g_config.trailAlphaPercent = 85;
         g_config.trailAlpha = 216;
+    } else if (preset >= PRESET_THEME_FIRST && preset < PRESET_THEME_FIRST + kThemeCount) {
+        const ThemePreset& t = kThemes[preset - PRESET_THEME_FIRST];
+        g_config.maxRadius = t.radius;
+        g_config.durationMs = t.duration;
+        g_config.ringThickness = t.thickness;
+        g_config.ringCount = t.rings;
+        g_config.centerDot = t.centerDot;
+        g_config.maxAlpha = t.alpha;
+        g_config.leftColor = t.left;
+        g_config.rightColor = t.right;
+        g_config.middleColor = t.middle;
+        g_config.ambientRipple = t.ambient;
+        g_config.ambientRadius = t.ambRadius;
+        g_config.ambientThickness = t.ambThickness;
+        g_config.ambientBand = t.ambThickness;
+        g_config.ambientAlphaPercent = t.ambPercent;
+        g_config.ambientAlpha = static_cast<int>(255.0f * (t.ambPercent / 100.0f));
+        g_config.ambientColor = t.ambColor;
+        g_config.trailEnabled = t.trail;
+        g_config.trailColor = t.trailColor;
+        g_config.trailDurationMs = t.trailDuration;
+        g_config.trailWidth = t.trailWidth;
+        g_config.trailAlphaPercent = t.trailPercent;
+        g_config.trailAlpha = static_cast<int>(255.0f * (t.trailPercent / 100.0f));
     }
 }
 
@@ -1321,7 +1436,7 @@ void updateSettingsLabels(HWND hwnd) {
 }
 
 void syncSettingsControls(HWND hwnd) {
-    SendDlgItemMessageW(hwnd, IDC_PRESET_COMBO, CB_SETCURSEL, g_config.stylePreset, 0);
+    SendDlgItemMessageW(hwnd, IDC_PRESET_COMBO, CB_SETCURSEL, presetToComboIndex(g_config.stylePreset), 0);
 
     SendDlgItemMessageW(hwnd, IDC_TRK_RADIUS, TBM_SETPOS, TRUE, g_config.maxRadius);
     SendDlgItemMessageW(hwnd, IDC_TRK_DURATION, TBM_SETPOS, TRUE, g_config.durationMs);
@@ -1398,9 +1513,12 @@ LRESULT CALLBACK settingsWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPar
 
         HWND hCombo = CreateWindowExW(0, L"COMBOBOX", L"",
                                       WS_CHILD | WS_VISIBLE | CBS_DROPDOWNLIST | WS_TABSTOP,
-                                      30, 30, 360, 150, hwnd, (HMENU)(INT_PTR)IDC_PRESET_COMBO, g_instance, nullptr);
+                                      30, 30, 360, 340, hwnd, (HMENU)(INT_PTR)IDC_PRESET_COMBO, g_instance, nullptr);
         SendMessageW(hCombo, CB_ADDSTRING, 0, (LPARAM)L"✨ Wacom 细腻笔触风格 (推荐: 小巧/灵动/触点)");
         SendMessageW(hCombo, CB_ADDSTRING, 0, (LPARAM)L"🌊 经典水波涟漪风格 (大半径/多层扩散/悠长)");
+        for (int i = 0; i < kThemeCount; ++i) {
+            SendMessageW(hCombo, CB_ADDSTRING, 0, (LPARAM)kThemes[i].name);
+        }
         SendMessageW(hCombo, CB_ADDSTRING, 0, (LPARAM)L"🛠️ 自定义参数 (自由调节)");
 
         // 2. Click Ripples GroupBox
@@ -1654,23 +1772,23 @@ LRESULT CALLBACK settingsWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPar
         if (hTrack == GetDlgItem(hwnd, IDC_TRK_RADIUS)) {
             g_config.maxRadius = val;
             g_config.stylePreset = PRESET_CUSTOM;
-            SendDlgItemMessageW(hwnd, IDC_PRESET_COMBO, CB_SETCURSEL, PRESET_CUSTOM, 0);
+            SendDlgItemMessageW(hwnd, IDC_PRESET_COMBO, CB_SETCURSEL, presetToComboIndex(PRESET_CUSTOM), 0);
         } else if (hTrack == GetDlgItem(hwnd, IDC_TRK_DURATION)) {
             g_config.durationMs = val;
             g_config.stylePreset = PRESET_CUSTOM;
-            SendDlgItemMessageW(hwnd, IDC_PRESET_COMBO, CB_SETCURSEL, PRESET_CUSTOM, 0);
+            SendDlgItemMessageW(hwnd, IDC_PRESET_COMBO, CB_SETCURSEL, presetToComboIndex(PRESET_CUSTOM), 0);
         } else if (hTrack == GetDlgItem(hwnd, IDC_TRK_THICKNESS)) {
             g_config.ringThickness = val;
             g_config.stylePreset = PRESET_CUSTOM;
-            SendDlgItemMessageW(hwnd, IDC_PRESET_COMBO, CB_SETCURSEL, PRESET_CUSTOM, 0);
+            SendDlgItemMessageW(hwnd, IDC_PRESET_COMBO, CB_SETCURSEL, presetToComboIndex(PRESET_CUSTOM), 0);
         } else if (hTrack == GetDlgItem(hwnd, IDC_TRK_RINGS)) {
             g_config.ringCount = val;
             g_config.stylePreset = PRESET_CUSTOM;
-            SendDlgItemMessageW(hwnd, IDC_PRESET_COMBO, CB_SETCURSEL, PRESET_CUSTOM, 0);
+            SendDlgItemMessageW(hwnd, IDC_PRESET_COMBO, CB_SETCURSEL, presetToComboIndex(PRESET_CUSTOM), 0);
         } else if (hTrack == GetDlgItem(hwnd, IDC_TRK_ALPHA)) {
             g_config.maxAlpha = static_cast<int>(255.0f * (val / 100.0f));
             g_config.stylePreset = PRESET_CUSTOM;
-            SendDlgItemMessageW(hwnd, IDC_PRESET_COMBO, CB_SETCURSEL, PRESET_CUSTOM, 0);
+            SendDlgItemMessageW(hwnd, IDC_PRESET_COMBO, CB_SETCURSEL, presetToComboIndex(PRESET_CUSTOM), 0);
         } else if (hTrack == GetDlgItem(hwnd, IDC_TRK_AMBIENT_RADIUS)) {
             g_config.ambientRadius = val;
         } else if (hTrack == GetDlgItem(hwnd, IDC_TRK_AMBIENT_ALPHA)) {
@@ -1701,7 +1819,8 @@ LRESULT CALLBACK settingsWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPar
         const int code = HIWORD(wParam);
 
         if (id == IDC_PRESET_COMBO && code == CBN_SELCHANGE) {
-            const int sel = (int)SendDlgItemMessageW(hwnd, IDC_PRESET_COMBO, CB_GETCURSEL, 0, 0);
+            const int selIdx = (int)SendDlgItemMessageW(hwnd, IDC_PRESET_COMBO, CB_GETCURSEL, 0, 0);
+            const int sel = (selIdx >= 0) ? comboIndexToPreset(selIdx) : -1;
             if (sel >= 0 && sel != PRESET_CUSTOM) {
                 applyPreset(sel);
                 syncSettingsControls(hwnd);
