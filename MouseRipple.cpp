@@ -94,6 +94,18 @@ enum StylePreset {
     PRESET_CUSTOM = 2
 };
 
+// 点击特效类型：0 = 原来的水波纹，其余是新增的各种特效
+enum ClickEffect {
+    EFFECT_RIPPLE = 0,
+    EFFECT_STARS = 1,        // 小星星闪烁
+    EFFECT_LIGHTNING = 2,    // 闪电盘旋
+    EFFECT_PETALS = 3,       // 花瓣
+    EFFECT_INK = 4,          // 水墨
+    EFFECT_FIREWORK = 5,     // 烟花
+    EFFECT_BUBBLES = 6,      // 泡泡
+    EFFECT_HEARTS = 7        // 爱心
+};
+
 struct AppConfig {
     int stylePreset = PRESET_WACOM;
     COLORREF leftColor = RGB(232, 65, 82);     // Wacom coral red
@@ -105,6 +117,7 @@ struct AppConfig {
     int ringCount = 1;                         // 1: pure Wacom ring, 2-3: ripples
     bool centerDot = true;                     // Subtle center contact flash
     int maxAlpha = 180;                        // Alpha opacity (默认 180 ≈ 70% 透明度，鲜明柔和)
+    int clickEffect = 0;                       // 点击特效类型，见 enum ClickEffect (0=水波纹)
 
     // Ambient continuous ripple settings (常驻动态纯净线条波纹)
     bool ambientRipple = true;                 // 始终开启
@@ -139,6 +152,7 @@ struct Ripple {
     POINT screenPt{};
     int buttonType = 0; // 0=Left, 1=Right, 2=Middle
     ULONGLONG startedAt = 0;
+    unsigned seed = 1;  // 随机种子：每次点击花样都不同
 };
 
 struct TrailPoint {
@@ -229,6 +243,8 @@ void loadConfig() {
     g_config.ringCount = GetPrivateProfileIntW(L"Config", L"RingCount", 1, ini.c_str());
     g_config.centerDot = GetPrivateProfileIntW(L"Config", L"CenterDot", 1, ini.c_str()) != 0;
     g_config.maxAlpha = GetPrivateProfileIntW(L"Config", L"MaxAlpha", 180, ini.c_str());
+    g_config.clickEffect = GetPrivateProfileIntW(L"Config", L"ClickEffect", 0, ini.c_str());
+    if (g_config.clickEffect < 0 || g_config.clickEffect > 7) g_config.clickEffect = 0;
 
     // Ambient ripple configuration (纯净线条圈, 0-100% 透明度)
     g_config.ambientRipple = GetPrivateProfileIntW(L"Config", L"AmbientRipple", 1, ini.c_str()) != 0;
@@ -271,6 +287,7 @@ void saveConfig() {
     WritePrivateProfileStringW(L"Config", L"RingCount", std::to_wstring(g_config.ringCount).c_str(), ini.c_str());
     WritePrivateProfileStringW(L"Config", L"CenterDot", g_config.centerDot ? L"1" : L"0", ini.c_str());
     WritePrivateProfileStringW(L"Config", L"MaxAlpha", std::to_wstring(g_config.maxAlpha).c_str(), ini.c_str());
+    WritePrivateProfileStringW(L"Config", L"ClickEffect", std::to_wstring(g_config.clickEffect).c_str(), ini.c_str());
 
     // Ambient ripple save
     WritePrivateProfileStringW(L"Config", L"AmbientRipple", g_config.ambientRipple ? L"1" : L"0", ini.c_str());
@@ -319,6 +336,8 @@ struct ThemePreset {
     int trailDuration;                       // 拖尾留存 150~800 ms
     int trailWidth;                          // 拖尾粗细 3~18 px
     int trailPercent;                        // 拖尾透明度 10~100 %
+    int effect;                              // 点击特效类型 (0=水波纹，1~7 见 enum ClickEffect)
+                                             // 特效类主题里：“圈数”滑块 = 数量档位，“半径”= 特效大小
 };
 
 const ThemePreset kThemes[] = {
@@ -366,6 +385,47 @@ const ThemePreset kThemes[] = {
       22, 240, 1, 1, 150, false, RGB(60,60,60),    RGB(110,110,110), RGB(160,160,160),
       false, 18, 1, 20, RGB(120,120,120),
       false, RGB(80,80,80),   300, 4, 50 },
+
+    // ================= 以下是“点击特效”类主题（不再是水波纹）=================
+    { L"✨ 星星闪烁 (点一下群星闪现又消失)",
+      44, 700, 2, 2, 240, false, RGB(255,196,40),  RGB(110,190,255), RGB(255,120,190),
+      false, 18, 2, 25, RGB(255,196,40),
+      true, RGB(255,196,40),  350, 6, 60, EFFECT_STARS },
+
+    { L"⚡ 闪电盘旋 (落雷+电弧环绕)",
+      54, 650, 2, 2, 245, false, RGB(70,170,255),  RGB(170,100,255), RGB(255,200,40),
+      false, 18, 2, 25, RGB(90,180,255),
+      true, RGB(90,180,255),  300, 5, 55, EFFECT_LIGHTNING },
+
+    { L"🌸 樱花飘落 (花瓣四散旋转飘落)",
+      58, 1100, 2, 2, 240, false, RGB(255,140,180), RGB(255,190,205), RGB(250,110,150),
+      false, 18, 2, 25, RGB(255,150,185),
+      true, RGB(255,150,185), 380, 6, 55, EFFECT_PETALS },
+
+    { L"🌺 缤纷花瓣 (多彩花瓣绽放)",
+      58, 1100, 2, 3, 240, false, RGB(255,105,150), RGB(150,110,255), RGB(255,170,50),
+      false, 18, 2, 25, RGB(255,130,170),
+      true, RGB(255,130,170), 380, 6, 55, EFFECT_PETALS },
+
+    { L"🖌️ 水墨闪现 (墨点泼溅后晕散)",
+      50, 850, 2, 2, 235, false, RGB(26,26,32),    RGB(36,66,128),   RGB(190,40,45),
+      false, 18, 2, 25, RGB(60,60,70),
+      true, RGB(40,40,48),    420, 8, 55, EFFECT_INK },
+
+    { L"🎆 烟花绽放 (火花四射下坠)",
+      64, 850, 2, 2, 240, false, RGB(255,140,30),  RGB(255,60,90),   RGB(60,200,255),
+      false, 18, 2, 25, RGB(255,160,60),
+      true, RGB(255,160,60),  300, 5, 55, EFFECT_FIREWORK },
+
+    { L"🫧 泡泡升空 (透明泡泡飘起破裂)",
+      52, 1200, 2, 2, 235, false, RGB(80,185,245), RGB(130,215,200), RGB(240,150,220),
+      false, 18, 2, 25, RGB(120,200,240),
+      false, RGB(90,190,240), 300, 5, 50, EFFECT_BUBBLES },
+
+    { L"💖 爱心飘升 (爱心弹出飘起)",
+      54, 1100, 2, 2, 240, false, RGB(255,75,120), RGB(255,130,170), RGB(190,90,240),
+      false, 18, 2, 25, RGB(255,110,150),
+      true, RGB(255,110,150), 350, 5, 55, EFFECT_HEARTS },
 };
 
 constexpr int kThemeCount = static_cast<int>(sizeof(kThemes) / sizeof(kThemes[0]));
@@ -389,6 +449,7 @@ int presetToComboIndex(int preset) {
 
 void applyPreset(int preset) {
     g_config.stylePreset = preset;
+    g_config.clickEffect = EFFECT_RIPPLE;   // 默认水波纹；下面的新特效主题会改写它
     if (preset == PRESET_WACOM) {
         g_config.maxRadius = 28;
         g_config.durationMs = 300;
@@ -446,6 +507,7 @@ void applyPreset(int preset) {
         g_config.trailWidth = t.trailWidth;
         g_config.trailAlphaPercent = t.trailPercent;
         g_config.trailAlpha = static_cast<int>(255.0f * (t.trailPercent / 100.0f));
+        g_config.clickEffect = t.effect;
     }
 }
 
@@ -992,6 +1054,431 @@ void drawAmbientRipple(Graphics& g, ULONGLONG now) {
     }
 }
 
+// =============================================================
+// 点击特效合集：小星星 / 闪电盘旋 / 花瓣 / 水墨 / 烟花 / 泡泡 / 爱心
+// 每个特效都是一个“纯函数”：给定动画进度 t (0~1)，画出这一帧，不保存任何状态。
+// 参数含义：cx,cy=点击位置  t=进度  R=大小(对应“波纹半径”滑块)
+//           A=不透明度(0~255)  col=颜色  seed=这一次点击的随机种子  density=数量档位(1~3)
+// =============================================================
+constexpr float kPi = 3.14159265f;
+
+inline float frand(unsigned& s) {
+    s = s * 1664525u + 1013904223u;
+    return static_cast<float>((s >> 8) & 0xFFFF) / 65536.0f;
+}
+
+inline float lerpf(float a, float b, float k) { return a + (b - a) * k; }
+
+inline float easeOutPow(float t, float p) { return 1.0f - std::pow(1.0f - clamp01(t), p); }
+
+// 颜色工具：shade>0 向白色靠近(变亮)，shade<0 向黑色靠近(变暗)
+Color makeColor(COLORREF c, float alpha, float shade = 0.0f) {
+    float r = static_cast<float>(GetRValue(c));
+    float gg = static_cast<float>(GetGValue(c));
+    float b = static_cast<float>(GetBValue(c));
+    if (shade >= 0.0f) {
+        r += (255.0f - r) * shade;
+        gg += (255.0f - gg) * shade;
+        b += (255.0f - b) * shade;
+    } else {
+        const float k = 1.0f + shade;
+        r *= k; gg *= k; b *= k;
+    }
+    return Color(alphaByte(alpha), alphaByte(r), alphaByte(gg), alphaByte(b));
+}
+
+// 柔和光晕：多层由大到小的半透明圆叠加，边缘自然羽化，没有硬边
+void softGlow(Graphics& g, float x, float y, float r, COLORREF col, float alpha, float shade = 0.0f) {
+    const float scale[7] = { 1.00f, 0.85f, 0.70f, 0.56f, 0.42f, 0.30f, 0.18f };
+    for (int i = 0; i < 7; ++i) {
+        const float rr = r * scale[i];
+        SolidBrush b(makeColor(col, alpha * 0.17f, shade));
+        g.FillEllipse(&b, x - rr, y - rr, rr * 2.0f, rr * 2.0f);
+    }
+}
+
+void addSparklePath(GraphicsPath& path, float cx, float cy, float outer, float innerRatio, int points, float rot) {
+    PointF pts[16];
+    const int n = points * 2;
+    for (int i = 0; i < n; ++i) {
+        const float a = rot + static_cast<float>(i) * kPi / static_cast<float>(points);
+        const float r = (i % 2 == 0) ? outer : outer * innerRatio;
+        pts[i] = PointF(cx + std::cos(a) * r, cy + std::sin(a) * r);
+    }
+    path.AddPolygon(pts, n);
+}
+
+// ---------- 1. 小星星闪烁 ----------
+void drawFxStars(Graphics& g, float cx, float cy, float t, float R, float A, COLORREF col, unsigned seed, int density) {
+    const int n = 6 + density * 3;
+    const float sc = R / 40.0f;
+    unsigned s = seed;
+    for (int i = 0; i < n; ++i) {
+        const float ang = frand(s) * 2.0f * kPi;
+        const float dist = R * (0.35f + 1.05f * frand(s));
+        const float delay = 0.22f * frand(s);
+        const float size = (4.5f + 8.0f * frand(s)) * sc;
+        const float rot0 = frand(s) * kPi;
+        const float spin = (frand(s) - 0.5f) * kPi * 0.9f;
+        const float whiteMix = 0.55f * frand(s);
+        const bool fivePt = (i % 3 == 2);
+
+        const float u = clamp01((t - delay) / (1.0f - delay));
+        if (u <= 0.0f || u >= 1.0f) continue;
+
+        const float pulse = std::sin(u * kPi);
+        const float twinkle = 0.80f + 0.20f * std::sin(u * kPi * 5.0f + static_cast<float>(i));
+        const float e = easeOutPow(u, 2.2f);
+        const float px = cx + std::cos(ang) * dist * e;
+        const float py = cy + std::sin(ang) * dist * e - 8.0f * sc * u;
+        const float sz = size * (0.25f + 0.75f * std::pow(pulse, 0.7f));
+        const float a = A * std::pow(pulse, 0.6f) * twinkle;
+
+        softGlow(g, px, py, sz * 1.9f, col, a * 0.55f, whiteMix);
+
+        GraphicsPath path;
+        if (fivePt) addSparklePath(path, px, py, sz * 0.85f, 0.45f, 5, rot0 + spin * u - kPi * 0.5f);
+        else addSparklePath(path, px, py, sz * 1.15f, 0.24f, 4, rot0 + spin * u);
+        SolidBrush body(makeColor(col, a, whiteMix));
+        g.FillPath(&body, &path);
+        Pen edge(makeColor(col, a * 0.65f, -0.30f), 0.9f);   // 细描边：浅色背景上也看得清
+        edge.SetLineJoin(LineJoinRound);
+        g.DrawPath(&edge, &path);
+
+        const float cr = sz * 0.20f;
+        SolidBrush core(Color(alphaByte(a * 0.9f), 255, 255, 255));
+        g.FillEllipse(&core, px - cr, py - cr, cr * 2.0f, cr * 2.0f);
+    }
+    if (t < 0.18f) {
+        const float k = 1.0f - t / 0.18f;
+        const float fr = (4.0f + 8.0f * (1.0f - k)) * sc;
+        softGlow(g, cx, cy, fr * 1.6f, col, A * 0.8f * k, 0.5f);
+    }
+}
+
+// ---------- 2. 闪电盘旋 ----------
+void drawBolt(Graphics& g, const PointF* pts, int n, float width, float A, COLORREF col) {
+    if (n < 2 || A < 1.0f) return;
+    Pen under(makeColor(col, A * 0.35f, -0.55f), width * 2.6f);   // 深色底边：浅色背景上托出轮廓
+    under.SetLineJoin(LineJoinRound); under.SetStartCap(LineCapRound); under.SetEndCap(LineCapRound);
+    g.DrawLines(&under, pts, n);
+    Pen glow(makeColor(col, A * 0.22f), width * 4.2f);
+    glow.SetLineJoin(LineJoinRound); glow.SetStartCap(LineCapRound); glow.SetEndCap(LineCapRound);
+    g.DrawLines(&glow, pts, n);
+    Pen mid(makeColor(col, A * 0.95f), width * 1.7f);
+    mid.SetLineJoin(LineJoinRound); mid.SetStartCap(LineCapRound); mid.SetEndCap(LineCapRound);
+    g.DrawLines(&mid, pts, n);
+    Pen core(Color(alphaByte(A * 0.95f), 255, 255, 255), (std::max)(0.8f, width * 0.6f));
+    core.SetLineJoin(LineJoinRound); core.SetStartCap(LineCapRound); core.SetEndCap(LineCapRound);
+    g.DrawLines(&core, pts, n);
+}
+
+void drawFxLightning(Graphics& g, float cx, float cy, float t, float R, float A, COLORREF col, unsigned seed, int density) {
+    const float sc = R / 50.0f;
+    unsigned base = seed;
+    const float rotBase = frand(base) * 2.0f * kPi;
+    const float strikeX = (frand(base) - 0.5f) * R * 0.5f;
+    // 闪烁：每约 1/16 的生命周期换一次随机抖动，像真实电弧一样噼啪跳动
+    unsigned fs = seed ^ (static_cast<unsigned>(t * 16.0f) * 2654435761u);
+    const float flick = 0.65f + 0.35f * frand(fs);
+    const float fade = std::pow(1.0f - t, 0.7f);
+    const float a = A * fade * flick;
+
+    // 1) 开场一道落雷，劈到点击位置
+    if (t < 0.32f) {
+        const float k = 1.0f - t / 0.32f;
+        const int segs = 8;
+        PointF pts[segs + 1];
+        const float topX = cx + strikeX;
+        const float topY = cy - R * 2.2f;
+        for (int i = 0; i <= segs; ++i) {
+            const float f = static_cast<float>(i) / segs;
+            float x = lerpf(topX, cx, f);
+            const float y = lerpf(topY, cy, f);
+            if (i > 0 && i < segs) x += (frand(fs) - 0.5f) * R * 0.50f * (1.0f - f * 0.5f);
+            pts[i] = PointF(x, y);
+        }
+        drawBolt(g, pts, segs + 1, 2.4f * sc, A * k, col);
+    }
+
+    // 2) 围绕点击位置盘旋的电弧
+    const int arcs = 2 + density;
+    for (int k = 0; k < arcs; ++k) {
+        const float rot = rotBase + static_cast<float>(k) * 2.0f * kPi / arcs + t * 2.6f * kPi;
+        const float rad = R * (0.30f + 0.70f * easeOutPow(t, 1.8f));
+        const float span = 0.9f + 0.5f * frand(fs);
+        const int M = 9;
+        PointF pts[M];
+        for (int i = 0; i < M; ++i) {
+            const float f = static_cast<float>(i) / (M - 1);
+            const float th = rot + span * f;
+            const float rr = rad + (frand(fs) - 0.5f) * R * 0.18f;
+            pts[i] = PointF(cx + std::cos(th) * rr, cy + std::sin(th) * rr);
+        }
+        drawBolt(g, pts, M, 1.9f * sc, a, col);
+        // 一根小分叉
+        const float bAng = rot + span * 0.5f;
+        const PointF from = pts[M / 2];
+        const float blen = R * (0.16f + 0.14f * frand(fs));
+        const float dir = bAng + (frand(fs) > 0.5f ? 0.9f : -0.9f) + 1.5708f;
+        PointF br[3] = { from,
+                         PointF(from.X + std::cos(dir) * blen * 0.5f + (frand(fs) - 0.5f) * 3.0f * sc,
+                                from.Y + std::sin(dir) * blen * 0.5f),
+                         PointF(from.X + std::cos(dir) * blen, from.Y + std::sin(dir) * blen) };
+        drawBolt(g, br, 3, 1.3f * sc, a * 0.85f, col);
+    }
+
+    // 3) 中心闪光
+    if (t < 0.25f) {
+        const float k = 1.0f - t / 0.25f;
+        const float fr = R * (0.18f + 0.22f * (1.0f - k));
+        softGlow(g, cx, cy, fr * 1.8f, col, A * 0.9f * k, 0.5f);
+    }
+}
+
+// ---------- 3. 花瓣闪现 / 飘落 ----------
+void drawFxPetals(Graphics& g, float cx, float cy, float t, float R, float A, COLORREF col, unsigned seed, int density) {
+    const int n = 7 + density * 3;
+    unsigned s = seed;
+    for (int i = 0; i < n; ++i) {
+        const float ang = frand(s) * 2.0f * kPi;
+        const float speed = R * (0.8f + 0.9f * frand(s));
+        const float delay = 0.08f * frand(s);
+        const float L = R * (0.17f + 0.12f * frand(s));
+        const float phase = frand(s) * 2.0f * kPi;
+        const float spin = (frand(s) - 0.5f) * 2.0f * kPi * 2.2f;
+        const float rot0 = frand(s) * 2.0f * kPi;
+        const float shade = 0.5f * frand(s) - 0.15f;
+
+        const float u = clamp01((t - delay) / (1.0f - delay));
+        if (u <= 0.0f || u >= 1.0f) continue;
+
+        const float e = easeOutPow(u, 2.4f);
+        const float px = cx + std::cos(ang) * speed * e + std::sin(u * kPi * 2.5f + phase) * R * 0.12f * u;
+        const float py = cy + std::sin(ang) * speed * e * 0.8f + R * 1.0f * u * u;
+        const float rot = rot0 + spin * u;
+        const float flip = 0.30f + 0.70f * std::fabs(std::cos(u * kPi * 3.2f + phase));
+        const float a = A * clamp01(u * 10.0f) * (1.0f - std::pow(u, 2.5f));
+
+        const float w = L * 0.55f;
+        GraphicsPath petal;
+        petal.AddBezier(PointF(0, 0), PointF(-w, -L * 0.35f), PointF(-w * 0.7f, -L * 0.9f), PointF(0, -L));
+        petal.AddBezier(PointF(0, -L), PointF(w * 0.7f, -L * 0.9f), PointF(w, -L * 0.35f), PointF(0, 0));
+        petal.CloseFigure();
+
+        Matrix m;
+        m.Translate(px, py);
+        m.Rotate(rot * 180.0f / kPi);
+        m.Scale(flip, 1.0f);
+        g.SetTransform(&m);
+        SolidBrush body(makeColor(col, a, shade));
+        g.FillPath(&body, &petal);
+        Pen vein(makeColor(col, a * 0.45f, shade + 0.25f), 0.8f);
+        g.DrawLine(&vein, PointF(0, -L * 0.08f), PointF(0, -L * 0.78f));
+        g.ResetTransform();
+    }
+}
+
+// ---------- 4. 水墨闪现 ----------
+void addBlobPath(GraphicsPath& path, float cx, float cy, float r, unsigned seed, int n, float jitter) {
+    std::vector<PointF> pts;
+    pts.reserve(n);
+    unsigned s = seed;
+    for (int k = 0; k < n; ++k) {
+        const float a = 2.0f * kPi * static_cast<float>(k) / static_cast<float>(n);
+        const float rr = r * (1.0f - jitter + 2.0f * jitter * frand(s));
+        pts.emplace_back(cx + std::cos(a) * rr, cy + std::sin(a) * rr);
+    }
+    path.AddClosedCurve(pts.data(), n, 0.5f);
+}
+
+void drawFxInk(Graphics& g, float cx, float cy, float t, float R, float A, COLORREF col, unsigned seed, int density) {
+    const float open = easeOutPow((std::min)(1.0f, t / 0.30f), 3.0f);
+    const float fade = (t < 0.5f) ? 1.0f : std::pow(1.0f - (t - 0.5f) / 0.5f, 1.4f);
+    const float a = A * fade;
+    if (a < 1.0f) return;
+    const float r0 = R * 0.40f * (0.20f + 0.80f * open) * (1.0f + 0.10f * t);
+
+    // 晕染：由外到内三层叠加，边缘像宣纸上洇开的墨
+    { GraphicsPath p; addBlobPath(p, cx, cy, r0 * 1.30f, seed + 11u, 14, 0.20f);
+      SolidBrush b(makeColor(col, a * 0.10f)); g.FillPath(&b, &p); }
+    { GraphicsPath p; addBlobPath(p, cx, cy, r0 * 1.15f, seed + 7u, 14, 0.20f);
+      SolidBrush b(makeColor(col, a * 0.18f)); g.FillPath(&b, &p); }
+    { GraphicsPath p; addBlobPath(p, cx, cy, r0, seed, 14, 0.22f);
+      SolidBrush b(makeColor(col, a * 0.90f)); g.FillPath(&b, &p); }
+    { GraphicsPath p; addBlobPath(p, cx, cy, r0 * 0.55f, seed + 3u, 10, 0.15f);
+      SolidBrush b(makeColor(col, a * 0.45f, -0.35f)); g.FillPath(&b, &p); }
+
+    unsigned s = seed ^ 0x9E3779B9u;
+    // 飞溅的墨条：根部粗、尖端细
+    const int ns = 6 + density * 2;
+    for (int i = 0; i < ns; ++i) {
+        const float ang = 2.0f * kPi * static_cast<float>(i) / ns + (frand(s) - 0.5f) * 0.5f;
+        const float len = R * (0.45f + 0.65f * frand(s)) * open;
+        const float w0 = R * (0.045f + 0.055f * frand(s));
+        const float bd = r0 * 0.7f;
+        const float ux = std::cos(ang), uy = std::sin(ang);
+        const float nx = -uy, ny = ux;
+        PointF poly[5] = {
+            PointF(cx + ux * bd + nx * w0,            cy + uy * bd + ny * w0),
+            PointF(cx + ux * (bd + len * 0.55f) + nx * w0 * 0.45f, cy + uy * (bd + len * 0.55f) + ny * w0 * 0.45f),
+            PointF(cx + ux * (bd + len),              cy + uy * (bd + len)),
+            PointF(cx + ux * (bd + len * 0.55f) - nx * w0 * 0.45f, cy + uy * (bd + len * 0.55f) - ny * w0 * 0.45f),
+            PointF(cx + ux * bd - nx * w0,            cy + uy * bd - ny * w0)
+        };
+        SolidBrush b(makeColor(col, a * 0.90f));
+        g.FillPolygon(&b, poly, 5);
+        const float dr = w0 * (0.5f + 0.4f * frand(s));
+        const float dd = bd + len + R * 0.10f * open;
+        g.FillEllipse(&b, cx + ux * dd - dr, cy + uy * dd - dr, dr * 2.0f, dr * 2.0f);
+    }
+    // 远处的小墨点
+    const int nd = 6 + density * 3;
+    for (int i = 0; i < nd; ++i) {
+        const float ang = frand(s) * 2.0f * kPi;
+        const float d = R * (0.75f + 0.80f * frand(s)) * easeOutPow((std::min)(1.0f, t / 0.5f), 2.4f);
+        const float rad = R * (0.022f + 0.045f * frand(s)) * (1.0f - 0.4f * t);
+        SolidBrush b(makeColor(col, a * 0.85f));
+        g.FillEllipse(&b, cx + std::cos(ang) * d - rad, cy + std::sin(ang) * d - rad, rad * 2.0f, rad * 2.0f);
+    }
+}
+
+// ---------- 5. 烟花绽放 ----------
+void drawFxFirework(Graphics& g, float cx, float cy, float t, float R, float A, COLORREF col, unsigned seed, int density) {
+    const int n = 10 + density * 4;
+    const float sc = R / 50.0f;
+    unsigned s = seed;
+    const float grav = R * 0.55f * t * t;
+    const float alpha = A * std::pow(1.0f - t, 1.3f);
+    const float eHead = easeOutPow(t, 2.3f);
+    const float eTail = easeOutPow((std::max)(0.0f, t - 0.18f), 2.3f);
+    for (int i = 0; i < n; ++i) {
+        const float ang = 2.0f * kPi * static_cast<float>(i) / n + (frand(s) - 0.5f) * 0.35f;
+        const float reach = R * (0.55f + 0.55f * frand(s));
+        const float mix = 0.5f * frand(s);
+        const float pw = (2.0f + 2.2f * frand(s)) * sc * (1.0f - 0.45f * t);
+        const float ux = std::cos(ang), uy = std::sin(ang);
+        const float hx = cx + ux * reach * eHead, hy = cy + uy * reach * eHead + grav;
+        const float tx = cx + ux * reach * eTail, ty = cy + uy * reach * eTail + grav;
+        Pen halo(makeColor(col, alpha * 0.22f, mix), (std::max)(2.0f, pw * 2.8f));
+        halo.SetStartCap(LineCapRound); halo.SetEndCap(LineCapRound);
+        g.DrawLine(&halo, tx, ty, hx, hy);
+        Pen pen(makeColor(col, alpha, mix), (std::max)(1.2f, pw));
+        pen.SetStartCap(LineCapRound); pen.SetEndCap(LineCapRound);
+        g.DrawLine(&pen, tx, ty, hx, hy);
+        const float hr = 2.2f * sc * (1.0f - t);
+        SolidBrush head(makeColor(col, alpha, 0.65f));
+        g.FillEllipse(&head, hx - hr, hy - hr, hr * 2.0f, hr * 2.0f);
+    }
+    // 闪烁的碎光
+    for (int i = 0; i < n; ++i) {
+        const float ang = frand(s) * 2.0f * kPi;
+        const float d = R * (0.35f + 0.75f * frand(s)) * eHead;
+        const float ph = frand(s) * 2.0f * kPi;
+        const float tw = 0.5f + 0.5f * std::sin(t * 22.0f + ph);
+        const float rr = 1.8f * sc;
+        SolidBrush b(makeColor(col, alpha * 0.9f * tw, 0.2f));
+        g.FillEllipse(&b, cx + std::cos(ang) * d - rr, cy + std::sin(ang) * d + grav - rr, rr * 2.0f, rr * 2.0f);
+    }
+    if (t < 0.18f) {
+        const float k = 1.0f - t / 0.18f;
+        const float fr = (5.0f + 10.0f * (1.0f - k)) * sc;
+        softGlow(g, cx, cy, fr * 1.8f, col, A * 0.9f * k, 0.4f);
+    }
+}
+
+// ---------- 6. 泡泡升空 ----------
+void drawFxBubbles(Graphics& g, float cx, float cy, float t, float R, float A, COLORREF col, unsigned seed, int density) {
+    const int n = 5 + density * 2;
+    const float sc = R / 50.0f;
+    unsigned s = seed;
+    for (int i = 0; i < n; ++i) {
+        const float x0 = (frand(s) - 0.5f) * R * 0.9f;
+        const float y0 = (frand(s) - 0.5f) * R * 0.4f;
+        const float rise = R * (1.2f + 1.0f * frand(s));
+        const float delay = 0.2f * frand(s);
+        const float rad0 = R * (0.10f + 0.16f * frand(s));
+        const float phase = frand(s) * 2.0f * kPi;
+
+        const float u = clamp01((t - delay) / (1.0f - delay));
+        if (u <= 0.0f || u >= 1.0f) continue;
+
+        const float px = cx + x0 * (0.4f + 0.6f * easeOutPow(u, 2.0f)) + std::sin(u * kPi * 2.2f + phase) * R * 0.10f;
+        const float py = cy + y0 - rise * easeOutPow(u, 1.6f);
+        const float pop = (u > 0.82f) ? (u - 0.82f) / 0.18f : 0.0f;
+        const float rad = rad0 * (0.5f + 0.5f * easeOutPow(u, 2.0f)) * (1.0f + 0.5f * pop);
+        const float a = A * clamp01(u * 8.0f) * (1.0f - pop);
+
+        SolidBrush fill(makeColor(col, a * 0.14f, 0.4f));
+        g.FillEllipse(&fill, px - rad, py - rad, rad * 2.0f, rad * 2.0f);
+        Pen rim(makeColor(col, a * 0.85f, 0.15f), (std::max)(1.0f, 1.3f * sc));
+        g.DrawEllipse(&rim, px - rad, py - rad, rad * 2.0f, rad * 2.0f);
+        SolidBrush hl(Color(alphaByte(a * 0.85f), 255, 255, 255));
+        g.FillEllipse(&hl, px - rad * 0.55f, py - rad * 0.58f, rad * 0.38f, rad * 0.24f);
+        SolidBrush hl2(Color(alphaByte(a * 0.45f), 255, 255, 255));
+        g.FillEllipse(&hl2, px + rad * 0.25f, py + rad * 0.35f, rad * 0.22f, rad * 0.14f);
+    }
+}
+
+// ---------- 7. 爱心飘升 ----------
+void addHeartPath(GraphicsPath& p, float s) {
+    p.AddBezier(PointF(0, s * 0.95f), PointF(-s * 1.25f, s * 0.15f), PointF(-s * 0.75f, -s * 0.95f), PointF(0, -s * 0.35f));
+    p.AddBezier(PointF(0, -s * 0.35f), PointF(s * 0.75f, -s * 0.95f), PointF(s * 1.25f, s * 0.15f), PointF(0, s * 0.95f));
+    p.CloseFigure();
+}
+
+void drawFxHearts(Graphics& g, float cx, float cy, float t, float R, float A, COLORREF col, unsigned seed, int density) {
+    const int n = 4 + density * 2;
+    unsigned s = seed;
+    for (int i = 0; i < n; ++i) {
+        const float x0 = (frand(s) - 0.5f) * R * 1.7f;
+        const float rise = R * (0.9f + 1.1f * frand(s));
+        const float size = R * (0.20f + 0.14f * frand(s));
+        const float delay = 0.25f * frand(s);
+        const float phase = frand(s) * 2.0f * kPi;
+        const float tilt = (frand(s) - 0.5f) * 0.7f;
+        const float shade = 0.3f * frand(s) - 0.1f;
+
+        const float u = clamp01((t - delay) / (1.0f - delay));
+        if (u <= 0.0f || u >= 1.0f) continue;
+
+        const float px = cx + x0 * easeOutPow(u, 2.0f) + std::sin(u * kPi * 2.0f + phase) * R * 0.08f;
+        const float py = cy + R * 0.1f - rise * easeOutPow(u, 1.7f);
+        const float pk = (std::min)(1.0f, u / 0.30f);
+        const float scale = easeOutPow(pk, 2.0f) * (1.0f + 0.18f * std::sin(pk * kPi));
+        const float a = A * clamp01(u * 8.0f) * (1.0f - std::pow(u, 3.0f));
+        const float rot = tilt + std::sin(u * kPi * 2.0f + phase) * 0.20f;
+
+        GraphicsPath heart;
+        addHeartPath(heart, size);
+        Matrix m;
+        m.Translate(px, py);
+        m.Rotate(rot * 180.0f / kPi);
+        m.Scale(scale, scale);
+        g.SetTransform(&m);
+        SolidBrush body(makeColor(col, a, shade));
+        g.FillPath(&body, &heart);
+        SolidBrush hl(Color(alphaByte(a * 0.55f), 255, 255, 255));
+        g.FillEllipse(&hl, -size * 0.62f, -size * 0.62f, size * 0.34f, size * 0.22f);
+        g.ResetTransform();
+    }
+}
+
+// 统一入口：根据当前选中的特效类型，画出一次点击的这一帧
+void drawClickEffect(Graphics& g, int effect, float cx, float cy, float t, float R, float A,
+                     COLORREF col, unsigned seed, int density) {
+    switch (effect) {
+    case EFFECT_STARS:     drawFxStars(g, cx, cy, t, R, A, col, seed, density); break;
+    case EFFECT_LIGHTNING: drawFxLightning(g, cx, cy, t, R, A, col, seed, density); break;
+    case EFFECT_PETALS:    drawFxPetals(g, cx, cy, t, R, A, col, seed, density); break;
+    case EFFECT_INK:       drawFxInk(g, cx, cy, t, R, A, col, seed, density); break;
+    case EFFECT_FIREWORK:  drawFxFirework(g, cx, cy, t, R, A, col, seed, density); break;
+    case EFFECT_BUBBLES:   drawFxBubbles(g, cx, cy, t, R, A, col, seed, density); break;
+    case EFFECT_HEARTS:    drawFxHearts(g, cx, cy, t, R, A, col, seed, density); break;
+    default: break;
+    }
+}
+
 // -------------------------------------------------------------
 // Click Ripple Drawing Animation (Wacom & Water Ripple with Gradients)
 // -------------------------------------------------------------
@@ -1117,7 +1604,21 @@ void renderOverlay(HWND hwnd) {
 
         // 3. Draw click ripples
         for (const auto& ripple : g_ripples) {
-            drawRipple(graphics, ripple, now);
+            if (g_config.clickEffect == EFFECT_RIPPLE) {
+                drawRipple(graphics, ripple, now);
+            } else {
+                COLORREF fxColor = g_config.leftColor;
+                if (ripple.buttonType == 1) fxColor = g_config.rightColor;
+                else if (ripple.buttonType == 2) fxColor = g_config.middleColor;
+                const float fxDur = static_cast<float>((std::max)(100, g_config.durationMs));
+                const float fxT = clamp01(static_cast<float>(now - ripple.startedAt) / fxDur);
+                drawClickEffect(graphics, g_config.clickEffect,
+                                static_cast<float>(ripple.screenPt.x - g_virtualX),
+                                static_cast<float>(ripple.screenPt.y - g_virtualY),
+                                fxT, static_cast<float>(g_config.maxRadius),
+                                static_cast<float>(g_config.maxAlpha), fxColor,
+                                ripple.seed, g_config.ringCount);
+            }
         }
 
         // 4. Draw teaching annotations (Live ink brush & quick arrows)
@@ -1151,6 +1652,9 @@ void addRipple(POINT screenPt, int buttonType) {
     ripple.screenPt = screenPt;
     ripple.buttonType = buttonType;
     ripple.startedAt = GetTickCount64();
+    ripple.seed = static_cast<unsigned>(ripple.startedAt * 2654435761ull) ^
+                  (static_cast<unsigned>(screenPt.x) * 73856093u) ^
+                  (static_cast<unsigned>(screenPt.y) * 19349663u);
     g_ripples.push_back(ripple);
 
     if (g_ripples.size() > 64) {
@@ -1375,9 +1879,15 @@ void updateSettingsLabels(HWND hwnd) {
     SetDlgItemTextW(hwnd, IDC_LBL_THICKNESS, ssT.str().c_str());
 
     std::wostringstream ssC;
-    ssC << L"波纹圈数: " << g_config.ringCount << L" 圈";
-    if (g_config.ringCount == 1) ssC << L" (纯净单圈)";
-    else if (g_config.ringCount >= 3) ssC << L" (水波涟漪)";
+    if (g_config.clickEffect == EFFECT_RIPPLE) {
+        ssC << L"波纹圈数: " << g_config.ringCount << L" 圈";
+        if (g_config.ringCount == 1) ssC << L" (纯净单圈)";
+        else if (g_config.ringCount >= 3) ssC << L" (水波涟漪)";
+    } else {
+        ssC << L"特效数量: " << g_config.ringCount << L" 档";
+        if (g_config.ringCount == 1) ssC << L" (疏朗)";
+        else if (g_config.ringCount >= 3) ssC << L" (繁盛)";
+    }
     SetDlgItemTextW(hwnd, IDC_LBL_RINGS, ssC.str().c_str());
 
     std::wostringstream ssA;
@@ -1556,7 +2066,7 @@ LRESULT CALLBACK settingsWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPar
         HWND hTrkDuration = CreateWindowExW(0, TRACKBAR_CLASSW, L"",
                                             WS_CHILD | WS_VISIBLE | TBS_AUTOTICKS | TBS_HORZ | WS_TABSTOP,
                                             25, 186, 365, 28, hwnd, (HMENU)(INT_PTR)IDC_TRK_DURATION, g_instance, nullptr);
-        SendMessageW(hTrkDuration, TBM_SETRANGE, TRUE, MAKELPARAM(150, 750));
+        SendMessageW(hTrkDuration, TBM_SETRANGE, TRUE, MAKELPARAM(150, 1500));
         SendMessageW(hTrkDuration, TBM_SETTICFREQ, 50, 0);
 
         // Thickness Trackbar (1 - 5 px)
