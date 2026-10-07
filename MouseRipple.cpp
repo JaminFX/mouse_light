@@ -103,7 +103,16 @@ enum ClickEffect {
     EFFECT_INK = 4,          // 水墨
     EFFECT_FIREWORK = 5,     // 烟花
     EFFECT_BUBBLES = 6,      // 泡泡
-    EFFECT_HEARTS = 7        // 爱心
+    EFFECT_HEARTS = 7,       // 爱心
+    EFFECT_SNOW = 8,         // 雪花
+    EFFECT_LEAVES = 9,       // 落叶
+    EFFECT_PAWS = 10,        // 猫爪印
+    EFFECT_COINS = 11,       // 金币
+    EFFECT_CONFETTI = 12,    // 彩带礼花
+    EFFECT_METEOR = 13,      // 流星
+    EFFECT_BUTTERFLY = 14,   // 蝴蝶
+    EFFECT_FIREFLY = 15,     // 萤火虫
+    EFFECT_NOTES = 16        // 音符
 };
 
 struct AppConfig {
@@ -244,7 +253,7 @@ void loadConfig() {
     g_config.centerDot = GetPrivateProfileIntW(L"Config", L"CenterDot", 1, ini.c_str()) != 0;
     g_config.maxAlpha = GetPrivateProfileIntW(L"Config", L"MaxAlpha", 180, ini.c_str());
     g_config.clickEffect = GetPrivateProfileIntW(L"Config", L"ClickEffect", 0, ini.c_str());
-    if (g_config.clickEffect < 0 || g_config.clickEffect > 7) g_config.clickEffect = 0;
+    if (g_config.clickEffect < 0 || g_config.clickEffect > 16) g_config.clickEffect = 0;
 
     // Ambient ripple configuration (纯净线条圈, 0-100% 透明度)
     g_config.ambientRipple = GetPrivateProfileIntW(L"Config", L"AmbientRipple", 1, ini.c_str()) != 0;
@@ -426,6 +435,51 @@ const ThemePreset kThemes[] = {
       54, 1100, 2, 2, 240, false, RGB(255,75,120), RGB(255,130,170), RGB(190,90,240),
       false, 18, 2, 25, RGB(255,110,150),
       true, RGB(255,110,150), 350, 5, 55, EFFECT_HEARTS },
+
+    { L"❄️ 雪花飘落 (六角雪花旋转飘落)",
+      56, 1300, 2, 2, 240, false, RGB(120,190,255), RGB(170,150,255), RGB(100,220,230),
+      false, 18, 2, 25, RGB(140,200,255),
+      true, RGB(140,200,255), 350, 5, 55, EFFECT_SNOW },
+
+    { L"🍁 落叶纷飞 (秋叶摇摆飘落)",
+      58, 1300, 2, 2, 240, false, RGB(224,96,28),  RGB(214,160,30),  RGB(168,44,36),
+      false, 18, 2, 25, RGB(224,120,40),
+      true, RGB(224,120,40),  400, 6, 55, EFFECT_LEAVES },
+
+    { L"🐾 猫爪印 (一串小爪印依次踩出)",
+      52, 1100, 2, 2, 240, false, RGB(255,140,160), RGB(120,84,70),  RGB(70,70,80),
+      false, 18, 2, 25, RGB(255,150,170),
+      false, RGB(255,150,170), 300, 5, 50, EFFECT_PAWS },
+
+    { L"💰 金币飞溅 (金币上抛翻转落下)",
+      60, 1000, 2, 2, 240, false, RGB(255,200,40), RGB(190,200,215), RGB(210,120,60),
+      false, 18, 2, 25, RGB(255,200,40),
+      true, RGB(255,200,40),  300, 5, 55, EFFECT_COINS },
+
+    { L"🎉 彩带礼花 (彩色纸片喷射飘落)",
+      66, 1200, 2, 2, 240, false, RGB(255,80,120), RGB(60,160,255), RGB(255,200,40),
+      false, 18, 2, 25, RGB(255,120,150),
+      true, RGB(255,120,150), 300, 5, 55, EFFECT_CONFETTI },
+
+    { L"☄️ 流星坠落 (流星划过撞出星光)",
+      58, 800, 2, 2, 240, false, RGB(255,200,90),  RGB(120,190,255), RGB(255,130,210),
+      false, 18, 2, 25, RGB(255,210,120),
+      false, RGB(255,210,120), 300, 5, 50, EFFECT_METEOR },
+
+    { L"🦋 蝴蝶翩翩 (蝴蝶扇动翅膀飞走)",
+      56, 1500, 2, 2, 240, false, RGB(80,160,255), RGB(255,140,200), RGB(255,190,60),
+      false, 18, 2, 25, RGB(120,180,255),
+      false, RGB(120,180,255), 300, 5, 50, EFFECT_BUTTERFLY },
+
+    { L"🌟 萤火虫 (荧光点点飘散闪烁)",
+      56, 1400, 2, 2, 240, false, RGB(150,225,50), RGB(255,225,90), RGB(90,235,190),
+      false, 18, 2, 25, RGB(170,235,80),
+      true, RGB(170,235,80),  300, 5, 45, EFFECT_FIREFLY },
+
+    { L"🎵 音符飘升 (音符弹出飘起)",
+      54, 1200, 2, 2, 240, false, RGB(60,130,255), RGB(255,90,150), RGB(40,200,160),
+      false, 18, 2, 25, RGB(100,150,255),
+      true, RGB(100,150,255), 300, 5, 50, EFFECT_NOTES },
 };
 
 constexpr int kThemeCount = static_cast<int>(sizeof(kThemes) / sizeof(kThemes[0]));
@@ -1464,6 +1518,466 @@ void drawFxHearts(Graphics& g, float cx, float cy, float t, float R, float A, CO
     }
 }
 
+COLORREF hsvShade(COLORREF c, float shade) {
+    float r = static_cast<float>(GetRValue(c)), gg = static_cast<float>(GetGValue(c)), b = static_cast<float>(GetBValue(c));
+    if (shade >= 0.0f) { r += (255.0f - r) * shade; gg += (255.0f - gg) * shade; b += (255.0f - b) * shade; }
+    else { const float k = 1.0f + shade; r *= k; gg *= k; b *= k; }
+    return RGB(static_cast<BYTE>(r + 0.5f), static_cast<BYTE>(gg + 0.5f), static_cast<BYTE>(b + 0.5f));
+}
+
+// ---------- 8. 雪花飘落 ----------
+void drawSnowflakeShape(Graphics& g, float L, float a, COLORREF col, float w) {
+    // 在当前坐标原点画一朵六角雪花：先画一层深色底边（浅色桌面上也看得见），再画亮色主体
+    for (int pass = 0; pass < 2; ++pass) {
+        Pen pen(pass == 0 ? makeColor(col, a * 0.55f, -0.45f) : makeColor(col, a, 0.30f),
+                pass == 0 ? w * 2.3f : w);
+        pen.SetStartCap(LineCapRound); pen.SetEndCap(LineCapRound);
+        for (int k = 0; k < 6; ++k) {
+            const float ang = static_cast<float>(k) * kPi / 3.0f;
+            const float ux = std::cos(ang), uy = std::sin(ang);
+            g.DrawLine(&pen, 0.0f, 0.0f, ux * L, uy * L);
+            const float bx = ux * L * 0.58f, by = uy * L * 0.58f;
+            for (int sgn = -1; sgn <= 1; sgn += 2) {
+                const float ba = ang + static_cast<float>(sgn) * 0.85f;
+                g.DrawLine(&pen, bx, by, bx + std::cos(ba) * L * 0.30f, by + std::sin(ba) * L * 0.30f);
+            }
+        }
+    }
+}
+
+void drawFxSnow(Graphics& g, float cx, float cy, float t, float R, float A, COLORREF col, unsigned seed, int density) {
+    const int n = 7 + density * 3;
+    const float sc = R / 50.0f;
+    unsigned s = seed;
+    for (int i = 0; i < n; ++i) {
+        const float ang = frand(s) * 2.0f * kPi;
+        const float speed = R * (0.5f + 0.9f * frand(s));
+        const float delay = 0.08f * frand(s);
+        const float L = R * (0.10f + 0.08f * frand(s));
+        const float phase = frand(s) * 2.0f * kPi;
+        const float spin = (frand(s) - 0.5f) * kPi * 1.6f;
+        const float u = clamp01((t - delay) / (1.0f - delay));
+        if (u <= 0.0f || u >= 1.0f) continue;
+
+        const float e = easeOutPow(u, 2.0f);
+        const float px = cx + std::cos(ang) * speed * e + std::sin(u * kPi * 2.2f + phase) * R * 0.12f * u;
+        const float py = cy + std::sin(ang) * speed * e * 0.6f + R * 0.75f * u * (0.5f + 0.5f * u);
+        const float a = A * clamp01(u * 8.0f) * (1.0f - std::pow(u, 3.0f));
+
+        softGlow(g, px, py, L * 1.5f, col, a * 0.35f, 0.4f);
+        g.TranslateTransform(px, py);
+        g.RotateTransform((phase + spin * u) * 180.0f / kPi);
+        drawSnowflakeShape(g, L, a, col, (std::max)(1.0f, 1.3f * sc));
+        g.ResetTransform();
+    }
+}
+
+// ---------- 9. 落叶 ----------
+void drawFxLeaves(Graphics& g, float cx, float cy, float t, float R, float A, COLORREF col, unsigned seed, int density) {
+    const int n = 6 + density * 2;
+    unsigned s = seed;
+    for (int i = 0; i < n; ++i) {
+        const float ang = frand(s) * 2.0f * kPi;
+        const float speed = R * (0.6f + 0.9f * frand(s));
+        const float delay = 0.06f * frand(s);
+        const float L = R * (0.20f + 0.12f * frand(s));
+        const float phase = frand(s) * 2.0f * kPi;
+        const float rot0 = frand(s) * 2.0f * kPi;
+        const float shade = 0.45f * frand(s) - 0.28f;
+        const float u = clamp01((t - delay) / (1.0f - delay));
+        if (u <= 0.0f || u >= 1.0f) continue;
+
+        const float e = easeOutPow(u, 2.2f);
+        const float sway = std::sin(u * kPi * 3.0f + phase);
+        const float px = cx + std::cos(ang) * speed * e + sway * R * 0.22f * u;
+        const float py = cy + std::sin(ang) * speed * e * 0.7f + R * 1.15f * u * u;
+        const float rot = rot0 + sway * 0.9f;
+        const float flip = 0.45f + 0.55f * std::fabs(std::cos(u * kPi * 2.4f + phase));
+        const float a = A * clamp01(u * 10.0f) * (1.0f - std::pow(u, 2.6f));
+
+        const float w = L * 0.42f;
+        GraphicsPath leaf;
+        leaf.AddBezier(PointF(0, 0), PointF(-w, -L * 0.25f), PointF(-w * 1.1f, -L * 0.75f), PointF(0, -L));
+        leaf.AddBezier(PointF(0, -L), PointF(w * 1.1f, -L * 0.75f), PointF(w, -L * 0.25f), PointF(0, 0));
+        leaf.CloseFigure();
+
+        Matrix m;
+        m.Translate(px, py);
+        m.Rotate(rot * 180.0f / kPi);
+        m.Scale(flip, 1.0f);
+        g.SetTransform(&m);
+        SolidBrush body(makeColor(col, a, shade));
+        g.FillPath(&body, &leaf);
+        Pen edge(makeColor(col, a * 0.6f, shade - 0.30f), 0.9f);
+        edge.SetLineJoin(LineJoinRound);
+        g.DrawPath(&edge, &leaf);
+        Pen vein(makeColor(col, a * 0.7f, shade + 0.30f), 0.9f);
+        g.DrawLine(&vein, PointF(0, L * 0.02f), PointF(0, -L * 0.85f));
+        Pen stem(makeColor(col, a, shade - 0.40f), 1.3f);
+        stem.SetEndCap(LineCapRound);
+        g.DrawLine(&stem, PointF(0, 0), PointF(0, L * 0.24f));
+        g.ResetTransform();
+    }
+}
+
+// ---------- 10. 猫爪印 ----------
+void drawPawShape(Graphics& g, float s, float a, COLORREF col) {
+    // 朝向：脚趾指向局部坐标的 -y 方向
+    SolidBrush br(makeColor(col, a));
+    g.FillEllipse(&br, -s * 1.0f, -s * 0.4f, s * 2.0f, s * 1.5f);          // 主肉垫
+    const float tx[4] = { -1.15f, -0.42f, 0.42f, 1.15f };
+    const float ty[4] = { -0.75f, -1.45f, -1.45f, -0.75f };
+    const float tilt[4] = { -28.0f, -8.0f, 8.0f, 28.0f };
+    for (int i = 0; i < 4; ++i) {                                          // 四颗脚趾豆
+        GraphicsState st = g.Save();
+        g.TranslateTransform(tx[i] * s, ty[i] * s, MatrixOrderPrepend);
+        g.RotateTransform(tilt[i], MatrixOrderPrepend);
+        g.FillEllipse(&br, -s * 0.42f, -s * 0.56f, s * 0.84f, s * 1.12f);
+        g.Restore(st);
+    }
+}
+
+void drawFxPaws(Graphics& g, float cx, float cy, float t, float R, float A, COLORREF col, unsigned seed, int density) {
+    const int n = 3 + density;
+    unsigned s = seed;
+    const float ang0 = -kPi * 0.5f + (frand(s) - 0.5f) * 1.4f;     // 大致朝上“走”出去
+    const float step = R * 0.50f;
+    const float ps = R * 0.15f;
+    const float dx = std::cos(ang0), dy = std::sin(ang0);
+    const float nx = -dy, ny = dx;
+    const float fade = (t < 0.65f) ? 1.0f : std::pow(1.0f - (t - 0.65f) / 0.35f, 1.2f);
+    for (int k = 0; k < n; ++k) {
+        const float delay = static_cast<float>(k) * 0.13f;
+        if (t < delay) continue;
+        const float pk = (std::min)(1.0f, (t - delay) / 0.12f);
+        const float pop = easeOutPow(pk, 2.0f) * (1.0f + 0.2f * std::sin(pk * kPi));
+        const float side = (k % 2 == 0) ? -1.0f : 1.0f;
+        const float px = cx + dx * step * static_cast<float>(k) + nx * side * R * 0.13f;
+        const float py = cy + dy * step * static_cast<float>(k) + ny * side * R * 0.13f;
+        g.TranslateTransform(px, py);
+        g.RotateTransform((ang0 + kPi * 0.5f) * 180.0f / kPi);
+        g.ScaleTransform(pop, pop);
+        drawPawShape(g, ps, A * fade, col);
+        g.ResetTransform();
+    }
+}
+
+// ---------- 11. 金币飞溅 ----------
+void drawFxCoins(Graphics& g, float cx, float cy, float t, float R, float A, COLORREF col, unsigned seed, int density) {
+    const int n = 5 + density * 2;
+    unsigned s = seed;
+    for (int i = 0; i < n; ++i) {
+        const float ang = -kPi * 0.5f + (frand(s) - 0.5f) * 1.7f;
+        const float v = R * (1.2f + 1.0f * frand(s));
+        const float r = R * (0.14f + 0.05f * frand(s));
+        const float phase = frand(s) * kPi;
+        const float spins = 4.0f + 5.0f * frand(s);
+        const float delay = 0.05f * frand(s);
+        const float u = clamp01((t - delay) / (1.0f - delay));
+        if (u <= 0.0f || u >= 1.0f) continue;
+
+        const float px = cx + std::cos(ang) * v * u;
+        const float py = cy + std::sin(ang) * v * u * 1.25f + R * 2.3f * u * u;   // 先上抛，再落下
+        const float flip = std::fabs(std::cos(u * spins * kPi + phase));
+        const float sx = 0.18f + 0.82f * flip;
+        const float a = A * clamp01((1.0f - u) / 0.25f);
+
+        g.TranslateTransform(px, py);
+        g.ScaleTransform(sx, 1.0f);
+        SolidBrush rim(makeColor(col, a, -0.35f));
+        g.FillEllipse(&rim, -r, -r, r * 2.0f, r * 2.0f);
+        SolidBrush face(makeColor(col, a, 0.12f));
+        g.FillEllipse(&face, -r * 0.78f, -r * 0.78f, r * 1.56f, r * 1.56f);
+        Pen ring(makeColor(col, a * 0.8f, -0.25f), 1.0f);
+        g.DrawEllipse(&ring, -r * 0.48f, -r * 0.48f, r * 0.96f, r * 0.96f);
+        SolidBrush hl(Color(alphaByte(a * 0.85f * flip), 255, 255, 255));
+        g.FillEllipse(&hl, -r * 0.62f, -r * 0.62f, r * 0.50f, r * 0.30f);
+        g.ResetTransform();
+    }
+}
+
+// ---------- 12. 彩带礼花 ----------
+COLORREF hsvColor(float h, float sat, float v) {
+    h -= std::floor(h);
+    const float hh = h * 6.0f;
+    const int i = static_cast<int>(hh);
+    const float f = hh - static_cast<float>(i);
+    const float p = v * (1.0f - sat);
+    const float q = v * (1.0f - sat * f);
+    const float tt = v * (1.0f - sat * (1.0f - f));
+    float r = v, gg = tt, b = p;
+    switch (i % 6) {
+    case 0: r = v;  gg = tt; b = p;  break;
+    case 1: r = q;  gg = v;  b = p;  break;
+    case 2: r = p;  gg = v;  b = tt; break;
+    case 3: r = p;  gg = q;  b = v;  break;
+    case 4: r = tt; gg = p;  b = v;  break;
+    default: r = v; gg = p;  b = q;  break;
+    }
+    return RGB(static_cast<BYTE>(r * 255.0f + 0.5f), static_cast<BYTE>(gg * 255.0f + 0.5f), static_cast<BYTE>(b * 255.0f + 0.5f));
+}
+
+void drawFxConfetti(Graphics& g, float cx, float cy, float t, float R, float A, COLORREF col, unsigned seed, int density) {
+    const int n = 14 + density * 6;
+    unsigned s = seed;
+    for (int i = 0; i < n; ++i) {
+        const float ang = -kPi * 0.5f + (frand(s) - 0.5f) * 2.6f;
+        const float v = R * (0.9f + 1.4f * frand(s));
+        const float w = R * (0.05f + 0.035f * frand(s));
+        const float h = w * (1.6f + 1.2f * frand(s));
+        const float phase = frand(s) * 2.0f * kPi;
+        const float spin = (frand(s) - 0.5f) * 2.0f * kPi * 4.0f;
+        const float delay = 0.04f * frand(s);
+        const float hue = frand(s);
+        const bool useBase = (i % 3 == 0);
+        const float u = clamp01((t - delay) / (1.0f - delay));
+        if (u <= 0.0f || u >= 1.0f) continue;
+
+        const float e = easeOutPow(u, 2.2f);
+        const float px = cx + std::cos(ang) * v * e + std::sin(u * kPi * 3.0f + phase) * R * 0.08f * u;
+        const float py = cy + std::sin(ang) * v * e + R * 1.3f * u * u;
+        const float flip = 0.15f + 0.85f * std::fabs(std::cos(u * kPi * 4.0f + phase));
+        const float a = A * clamp01((1.0f - u) / 0.30f) * clamp01(u * 12.0f);
+
+        Matrix m;
+        m.Translate(px, py);
+        m.Rotate(spin * u * 180.0f / kPi);
+        m.Scale(1.0f, flip);
+        g.SetTransform(&m);
+        SolidBrush b(useBase ? makeColor(col, a) : makeColor(hsvColor(hue, 0.72f, 1.0f), a));
+        g.FillRectangle(&b, -w * 0.5f, -h * 0.5f, w, h);
+        g.ResetTransform();
+    }
+    if (t < 0.12f) {
+        const float k = 1.0f - t / 0.12f;
+        softGlow(g, cx, cy, R * (0.25f + 0.25f * (1.0f - k)), col, A * 0.8f * k, 0.6f);
+    }
+}
+
+// ---------- 13. 流星坠落 ----------
+void drawFxMeteor(Graphics& g, float cx, float cy, float t, float R, float A, COLORREF col, unsigned seed, int density) {
+    unsigned s = seed;
+    const float sc = R / 50.0f;
+    const float dirAng = -kPi * 0.5f - 0.55f + (frand(s) - 0.5f) * 0.5f;      // 从左上方斜着坠落
+    const float sx = cx + std::cos(dirAng) * R * 3.2f;
+    const float sy = cy + std::sin(dirAng) * R * 3.2f;
+    const float tImpact = 0.42f;
+
+    const float ph = std::pow((std::min)(1.0f, t / tImpact), 1.7f);
+    const float pt = std::pow(clamp01((t - 0.05f) / (tImpact + 0.10f - 0.05f)), 1.5f);
+    const float hx = lerpf(sx, cx, ph), hy = lerpf(sy, cy, ph);
+    const float tx = lerpf(sx, cx, pt), ty = lerpf(sy, cy, pt);
+
+    if (ph - pt > 0.002f) {
+        const int nseg = 16;
+        for (int j = 0; j < nseg; ++j) {
+            const float f0 = static_cast<float>(j) / nseg;
+            const float f1 = static_cast<float>(j + 1) / nseg;
+            const float x0 = lerpf(tx, hx, f0), y0 = lerpf(ty, hy, f0);
+            const float x1 = lerpf(tx, hx, f1), y1 = lerpf(ty, hy, f1);
+            const float w = (0.5f + 3.6f * f1) * sc;
+            const float al = A * std::pow(f1, 1.5f);
+            Pen under(makeColor(col, al * 0.40f, -0.55f), w * 2.2f);
+            under.SetStartCap(LineCapRound); under.SetEndCap(LineCapRound);
+            g.DrawLine(&under, x0, y0, x1, y1);
+            Pen glow(makeColor(col, al * 0.22f), w * 3.4f);
+            glow.SetStartCap(LineCapRound); glow.SetEndCap(LineCapRound);
+            g.DrawLine(&glow, x0, y0, x1, y1);
+            Pen pen(makeColor(col, al), w);
+            pen.SetStartCap(LineCapRound); pen.SetEndCap(LineCapRound);
+            g.DrawLine(&pen, x0, y0, x1, y1);
+        }
+    }
+    if (t < tImpact + 0.04f) {
+        softGlow(g, hx, hy, R * 0.22f, col, A, 0.3f);
+        GraphicsPath star;
+        addSparklePath(star, hx, hy, R * 0.20f, 0.25f, 4, t * 6.0f);
+        SolidBrush b(Color(alphaByte(A), 255, 255, 255));
+        g.FillPath(&b, &star);
+    }
+    if (t >= tImpact) {
+        const float k = (t - tImpact) / (1.0f - tImpact);
+        const float fadeK = std::pow(1.0f - k, 1.4f);
+        Pen ring(makeColor(col, A * fadeK), (std::max)(1.2f, 2.4f * sc * (1.0f - k)));
+        const float rr = R * 0.7f * easeOutPow(k, 2.2f);
+        g.DrawEllipse(&ring, cx - rr, cy - rr, rr * 2.0f, rr * 2.0f);
+        for (int i = 0; i < 9; ++i) {
+            const float a2 = frand(s) * 2.0f * kPi;
+            const float d = R * (0.3f + 0.5f * frand(s)) * easeOutPow(k, 2.4f);
+            const float dr = 2.0f * sc * (1.0f - k) + 0.6f;
+            SolidBrush b(makeColor(col, A * fadeK, 0.35f));
+            g.FillEllipse(&b, cx + std::cos(a2) * d - dr, cy + std::sin(a2) * d - dr, dr * 2.0f, dr * 2.0f);
+        }
+        const float ss = R * 0.35f * std::pow(1.0f - k, 0.8f);
+        if (ss > 1.0f) {
+            softGlow(g, cx, cy, ss * 1.6f, col, A * fadeK, 0.4f);
+            GraphicsPath star;
+            addSparklePath(star, cx, cy, ss, 0.22f, 4, kPi * 0.25f);
+            SolidBrush b(Color(alphaByte(A * fadeK), 255, 255, 255));
+            g.FillPath(&b, &star);
+        }
+    }
+}
+
+// ---------- 14. 蝴蝶翩翩 ----------
+void drawButterflyShape(Graphics& g, float S, float flap, float a, COLORREF col, float shade) {
+    // 局部坐标：身体沿 y 轴，头朝 -y；flap 是翅膀张开程度 (0~1)
+    for (int side = -1; side <= 1; side += 2) {
+        const float f = static_cast<float>(side);
+        GraphicsPath up, lo;
+        up.AddBezier(PointF(0, -0.1f * S), PointF(f * 0.9f * S, -1.3f * S), PointF(f * 1.5f * S, -0.2f * S), PointF(0, 0.1f * S));
+        up.CloseFigure();
+        lo.AddBezier(PointF(0, 0.05f * S), PointF(f * 1.1f * S, 0.0f), PointF(f * 0.8f * S, 1.1f * S), PointF(0, 0.7f * S));
+        lo.CloseFigure();
+        Matrix m;
+        m.Scale(flap, 1.0f);
+        up.Transform(&m);
+        lo.Transform(&m);
+        SolidBrush bu(makeColor(col, a * 0.92f, shade));
+        SolidBrush bl(makeColor(col, a * 0.85f, shade - 0.18f));
+        g.FillPath(&bl, &lo);
+        g.FillPath(&bu, &up);
+        Pen edge(makeColor(col, a * 0.7f, shade - 0.40f), 0.9f);
+        edge.SetLineJoin(LineJoinRound);
+        g.DrawPath(&edge, &up);
+        g.DrawPath(&edge, &lo);
+        SolidBrush spot(Color(alphaByte(a * 0.75f), 255, 255, 255));
+        g.FillEllipse(&spot, f * 0.85f * S * flap - S * 0.13f, -0.62f * S - S * 0.13f, S * 0.26f, S * 0.26f);
+    }
+    SolidBrush body(makeColor(col, a, -0.6f));
+    g.FillEllipse(&body, -0.08f * S, -0.5f * S, 0.16f * S, 1.2f * S);
+    Pen ant(makeColor(col, a, -0.6f), 0.9f);
+    ant.SetEndCap(LineCapRound);
+    g.DrawLine(&ant, PointF(-0.03f * S, -0.5f * S), PointF(-0.32f * S, -0.95f * S));
+    g.DrawLine(&ant, PointF(0.03f * S, -0.5f * S), PointF(0.32f * S, -0.95f * S));
+}
+
+void drawFxButterflies(Graphics& g, float cx, float cy, float t, float R, float A, COLORREF col, unsigned seed, int density) {
+    const int n = 2 + density;
+    unsigned s = seed;
+    for (int i = 0; i < n; ++i) {
+        const float th0 = -kPi * 0.5f + (frand(s) - 0.5f) * 2.2f;
+        const float speed = R * (1.0f + 0.8f * frand(s));
+        const float S = R * (0.24f + 0.08f * frand(s));
+        const float phase = frand(s) * 2.0f * kPi;
+        const float shade = 0.35f * frand(s) - 0.15f;
+        const float delay = 0.10f * static_cast<float>(i);
+        const float u = clamp01((t - delay) / (1.0f - delay));
+        if (u <= 0.0f || u >= 1.0f) continue;
+
+        auto posAt = [&](float uu, float& x, float& y) {
+            const float e = easeOutPow(uu, 1.6f);
+            const float dx = std::cos(th0), dy = std::sin(th0);
+            const float wob = std::sin(uu * kPi * 3.0f + phase) * R * 0.35f * uu;
+            x = cx + dx * speed * e + (-dy) * wob;
+            y = cy + dy * speed * e + dx * wob;
+        };
+        float x0, y0, x1, y1;
+        posAt(u, x0, y0);
+        posAt((std::min)(1.0f, u + 0.01f), x1, y1);
+        const float heading = std::atan2(y1 - y0, x1 - x0);
+        const float flap = 0.20f + 0.80f * std::fabs(std::cos(u * kPi * 7.0f + phase));
+        const float a = A * clamp01(u * 8.0f) * clamp01((1.0f - u) / 0.30f);
+
+        g.TranslateTransform(x0, y0);
+        g.RotateTransform((heading + kPi * 0.5f) * 180.0f / kPi);
+        drawButterflyShape(g, S, flap, a, col, shade);
+        g.ResetTransform();
+    }
+}
+
+// ---------- 15. 萤火虫 ----------
+void drawFxFireflies(Graphics& g, float cx, float cy, float t, float R, float A, COLORREF col, unsigned seed, int density) {
+    const int n = 8 + density * 3;
+    unsigned s = seed;
+    for (int i = 0; i < n; ++i) {
+        const float ang = frand(s) * 2.0f * kPi;
+        const float d = R * (0.3f + 1.0f * frand(s));
+        const float phase = frand(s) * 2.0f * kPi;
+        const float size = R * (0.045f + 0.035f * frand(s));
+        const float delay = 0.15f * frand(s);
+        const float u = clamp01((t - delay) / (1.0f - delay));
+        if (u <= 0.0f || u >= 1.0f) continue;
+
+        const float e = easeOutPow(u, 1.8f);
+        const float px = cx + std::cos(ang) * d * e + std::sin(u * kPi * 3.0f + phase) * R * 0.12f;
+        const float py = cy + std::sin(ang) * d * e * 0.8f - R * 0.35f * u + std::cos(u * kPi * 2.3f + phase) * R * 0.10f;
+        const float env = std::sin(u * kPi);
+        const float blink = 0.35f + 0.65f * (0.5f + 0.5f * std::sin(u * kPi * 7.0f + phase));
+        const float a = A * env * blink;
+
+        softGlow(g, px, py, size * 2.3f, col, a * 0.45f, 0.0f);
+        SolidBrush core(makeColor(col, a, 0.55f));
+        g.FillEllipse(&core, px - size * 0.40f, py - size * 0.40f, size * 0.8f, size * 0.8f);
+        SolidBrush hot(Color(alphaByte(a * 0.9f), 255, 255, 235));
+        g.FillEllipse(&hot, px - size * 0.20f, py - size * 0.20f, size * 0.4f, size * 0.4f);
+    }
+}
+
+// ---------- 16. 音符飘升 ----------
+void drawMusicNote(Graphics& g, float s, float a, COLORREF col, bool pair) {
+    SolidBrush br(makeColor(col, a));
+    Pen stem(makeColor(col, a), s * 0.22f);
+    stem.SetStartCap(LineCapFlat); stem.SetEndCap(LineCapFlat);
+    auto head = [&](float x, float y) {
+        GraphicsState st = g.Save();
+        g.TranslateTransform(x, y, MatrixOrderPrepend);
+        g.RotateTransform(-22.0f, MatrixOrderPrepend);
+        g.FillEllipse(&br, -s * 0.62f, -s * 0.44f, s * 1.24f, s * 0.88f);
+        g.Restore(st);
+    };
+    const float stemX = s * 0.52f;
+    if (!pair) {                                   // ♪ 单个八分音符
+        head(0.0f, 0.0f);
+        g.DrawLine(&stem, stemX, 0.0f, stemX, -s * 3.2f);
+        Pen flag(makeColor(col, a), s * 0.34f);
+        flag.SetStartCap(LineCapRound); flag.SetEndCap(LineCapRound);
+        g.DrawBezier(&flag, PointF(stemX, -s * 3.2f), PointF(stemX + s * 1.4f, -s * 2.7f),
+                     PointF(stemX + s * 1.6f, -s * 1.7f), PointF(stemX + s * 0.7f, -s * 1.1f));
+    } else {                                       // ♫ 连梁双音符
+        const float x2 = s * 2.1f, y2 = -s * 0.45f;
+        head(0.0f, 0.0f);
+        head(x2, y2);
+        g.DrawLine(&stem, stemX, 0.0f, stemX, -s * 3.2f);
+        g.DrawLine(&stem, x2 + stemX, y2, x2 + stemX, -s * 3.65f);
+        PointF beam[4] = { PointF(stemX - s * 0.11f, -s * 3.2f), PointF(x2 + stemX + s * 0.11f, -s * 3.65f),
+                           PointF(x2 + stemX + s * 0.11f, -s * 3.10f), PointF(stemX - s * 0.11f, -s * 2.65f) };
+        g.FillPolygon(&br, beam, 4);
+    }
+}
+
+void drawFxNotes(Graphics& g, float cx, float cy, float t, float R, float A, COLORREF col, unsigned seed, int density) {
+    const int n = 4 + density;
+    unsigned s = seed;
+    for (int i = 0; i < n; ++i) {
+        const float x0 = (frand(s) - 0.5f) * R * 1.3f;
+        const float rise = R * (1.0f + 0.9f * frand(s));
+        const float size = R * (0.09f + 0.05f * frand(s));
+        const float delay = 0.22f * frand(s);
+        const float phase = frand(s) * 2.0f * kPi;
+        const float tilt = (frand(s) - 0.5f) * 0.5f;
+        const float shade = 0.3f * frand(s) - 0.12f;
+        const bool pair = (i % 3 == 1);
+        const float u = clamp01((t - delay) / (1.0f - delay));
+        if (u <= 0.0f || u >= 1.0f) continue;
+
+        const float px = cx + x0 * easeOutPow(u, 2.0f) + std::sin(u * kPi * 2.0f + phase) * R * 0.10f;
+        const float py = cy - rise * easeOutPow(u, 1.6f) + R * 0.1f;
+        const float pk = (std::min)(1.0f, u / 0.30f);
+        const float scale = easeOutPow(pk, 2.0f) * (1.0f + 0.18f * std::sin(pk * kPi));
+        const float a = A * clamp01(u * 8.0f) * (1.0f - std::pow(u, 3.0f));
+        const float rot = tilt + std::sin(u * kPi * 2.0f + phase) * 0.18f;
+
+        Matrix m;
+        m.Translate(px, py);
+        m.Rotate(rot * 180.0f / kPi);
+        m.Scale(scale, scale);
+        g.SetTransform(&m);
+        drawMusicNote(g, size, a, hsvShade(col, shade), pair);
+        g.ResetTransform();
+    }
+}
+
 // 统一入口：根据当前选中的特效类型，画出一次点击的这一帧
 void drawClickEffect(Graphics& g, int effect, float cx, float cy, float t, float R, float A,
                      COLORREF col, unsigned seed, int density) {
@@ -1475,6 +1989,15 @@ void drawClickEffect(Graphics& g, int effect, float cx, float cy, float t, float
     case EFFECT_FIREWORK:  drawFxFirework(g, cx, cy, t, R, A, col, seed, density); break;
     case EFFECT_BUBBLES:   drawFxBubbles(g, cx, cy, t, R, A, col, seed, density); break;
     case EFFECT_HEARTS:    drawFxHearts(g, cx, cy, t, R, A, col, seed, density); break;
+    case EFFECT_SNOW:      drawFxSnow(g, cx, cy, t, R, A, col, seed, density); break;
+    case EFFECT_LEAVES:    drawFxLeaves(g, cx, cy, t, R, A, col, seed, density); break;
+    case EFFECT_PAWS:      drawFxPaws(g, cx, cy, t, R, A, col, seed, density); break;
+    case EFFECT_COINS:     drawFxCoins(g, cx, cy, t, R, A, col, seed, density); break;
+    case EFFECT_CONFETTI:  drawFxConfetti(g, cx, cy, t, R, A, col, seed, density); break;
+    case EFFECT_METEOR:    drawFxMeteor(g, cx, cy, t, R, A, col, seed, density); break;
+    case EFFECT_BUTTERFLY: drawFxButterflies(g, cx, cy, t, R, A, col, seed, density); break;
+    case EFFECT_FIREFLY:   drawFxFireflies(g, cx, cy, t, R, A, col, seed, density); break;
+    case EFFECT_NOTES:     drawFxNotes(g, cx, cy, t, R, A, col, seed, density); break;
     default: break;
     }
 }
@@ -2023,7 +2546,7 @@ LRESULT CALLBACK settingsWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPar
 
         HWND hCombo = CreateWindowExW(0, L"COMBOBOX", L"",
                                       WS_CHILD | WS_VISIBLE | CBS_DROPDOWNLIST | WS_TABSTOP,
-                                      30, 30, 360, 340, hwnd, (HMENU)(INT_PTR)IDC_PRESET_COMBO, g_instance, nullptr);
+                                      30, 30, 360, 560, hwnd, (HMENU)(INT_PTR)IDC_PRESET_COMBO, g_instance, nullptr);
         SendMessageW(hCombo, CB_ADDSTRING, 0, (LPARAM)L"✨ Wacom 细腻笔触风格 (推荐: 小巧/灵动/触点)");
         SendMessageW(hCombo, CB_ADDSTRING, 0, (LPARAM)L"🌊 经典水波涟漪风格 (大半径/多层扩散/悠长)");
         for (int i = 0; i < kThemeCount; ++i) {
