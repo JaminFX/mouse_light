@@ -47,6 +47,9 @@ constexpr UINT ID_TRAY_AUTOSTART = 1002;
 constexpr UINT ID_TRAY_EXIT      = 1003;
 
 // Settings control IDs
+#ifndef CB_SETMINVISIBLE
+#define CB_SETMINVISIBLE 0x1701
+#endif
 constexpr int IDC_PRESET_COMBO        = 2001;
 constexpr int IDC_BTN_COLOR_LEFT      = 2002;
 constexpr int IDC_BTN_COLOR_RIGHT     = 2003;
@@ -3314,6 +3317,7 @@ LRESULT CALLBACK settingsWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPar
             SendMessageW(hCombo, CB_ADDSTRING, 0, (LPARAM)kThemes[i].name);
         }
         SendMessageW(hCombo, CB_ADDSTRING, 0, (LPARAM)L"🛠️ 自定义参数 (自由调节)");
+        SendMessageW(hCombo, CB_SETMINVISIBLE, 64, 0);   // 尽量一次显示全部预设（屏幕放不下时自动截断）
 
         // 2. Click Ripples GroupBox
         CreateWindowExW(0, L"BUTTON", L" 点击波纹色彩与动态 ",
@@ -3612,6 +3616,24 @@ LRESULT CALLBACK settingsWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPar
         const int id = LOWORD(wParam);
         const int code = HIWORD(wParam);
 
+        if (id == IDC_PRESET_COMBO && code == CBN_DROPDOWN) {
+            HWND hCb = GetDlgItem(hwnd, IDC_PRESET_COMBO);
+            const int cnt = (int)SendMessageW(hCb, CB_GETCOUNT, 0, 0);
+            const int itemH = (int)SendMessageW(hCb, CB_GETITEMHEIGHT, 0, 0);
+            const int fieldH = (int)SendMessageW(hCb, CB_GETITEMHEIGHT, (WPARAM)-1, 0);
+            if (cnt > 0 && itemH > 0) {
+                RECT rc{};
+                GetWindowRect(hCb, &rc);
+                MONITORINFO mi{};
+                mi.cbSize = sizeof(mi);
+                GetMonitorInfoW(MonitorFromWindow(hCb, MONITOR_DEFAULTTONEAREST), &mi);
+                const int maxH = (mi.rcWork.bottom - mi.rcWork.top) - 16;          // 不超过屏幕可用高度
+                int wantH = fieldH + itemH * cnt + 10;                              // 选择框 + 全部列表项
+                if (wantH > maxH) wantH = maxH;
+                SetWindowPos(hCb, nullptr, 0, 0, rc.right - rc.left, wantH,
+                             SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
+            }
+        }
         if (id == IDC_PRESET_COMBO && code == CBN_SELCHANGE) {
             const int selIdx = (int)SendDlgItemMessageW(hwnd, IDC_PRESET_COMBO, CB_GETCURSEL, 0, 0);
             const int sel = (selIdx >= 0) ? comboIndexToPreset(selIdx) : -1;
