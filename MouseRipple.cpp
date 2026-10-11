@@ -237,6 +237,7 @@ HINSTANCE g_instance = nullptr;
 HWND g_overlay = nullptr;
 HWND g_settingsWnd = nullptr;
 HHOOK g_mouseHook = nullptr;
+volatile ULONGLONG g_lastMouseHookTick = 0;   // 鼠标钩子最近一次收到事件的时间（看门狗据此判断钩子是否还活着）
 ULONG_PTR g_gdiplusToken = 0;
 HFONT g_uiFont = nullptr;
 std::vector<Ripple> g_ripples;
@@ -2949,6 +2950,7 @@ void addRipple(POINT screenPt, int buttonType) {
 }
 
 LRESULT CALLBACK lowLevelMouseProc(int code, WPARAM wParam, LPARAM lParam) {
+    g_lastMouseHookTick = GetTickCount64();   // 心跳：证明钩子还在工作
     if (code == HC_ACTION && g_overlay) {
         const auto* info = reinterpret_cast<MSLLHOOKSTRUCT*>(lParam);
         const bool isCtrlAlt = ((GetAsyncKeyState(VK_CONTROL) & 0x8000) != 0) &&
@@ -3830,11 +3832,143 @@ void openSettingsWindow() {
 // Main Overlay Window Implementation
 // -------------------------------------------------------------
 
+// -------------------------------------------------------------
+// 看门狗：每 0.5 秒自检一次，解决“后打开的软件上特效失效，重启才恢复”
+//  A) 覆盖窗口被后打开的置顶窗口盖住 -> 重新置顶
+//  B) 鼠标明明在动，钩子却收不到任何事件（被系统摘掉 / 被后装的软件抢在前面拦截） -> 重新安装钩子
+// 重新安装的钩子会排到钩子队列最前面，效果等同于“重启软件”。
+// -------------------------------------------------------------
+constexpr UINT_PTR kWatchdogTimerId = 2;
+constexpr UINT kWatchdogMs = 500;
+
+void watchdogLog(const std::wstring& msg) {
+    // 极简日志：写在 exe 旁边的 MouseRipple_watchdog.log，最多 64KB，超过就清空重写。
+    // 只在“发生自愈”时才写，平时不写；方便出问题时看到到底是哪种情况。
+    static ULONGLONG s_lastLog = 0;
+    const ULONGLONG now = GetTickCount64();
+    if (s_lastLog != 0 && now - s_lastLog < 2000) return;   // 节流，防止刷屏
+    s_lastLog = now;
+
+    std::wstring path = getIniPath();
+    const size_t pos = path.rfind(L"MouseRipple.ini");
+    if (pos == std::wstring::npos) return;
+    path = path.substr(0, pos) + L"MouseRipple_watchdog.log";
+
+    HANDLE h = CreateFileW(path.c_str(), GENERIC_WRITE, FILE_SHARE_READ, nullptr, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (h == INVALID_HANDLE_VALUE) return;               // 目录不可写就算了，不影响功能
+    LARGE_INTEGER sz{};
+    GetFileSizeEx(h, &sz);
+    if (sz.QuadPart > 65536) {
+        SetFilePointer(h, 0, nullptr, FILE_BEGIN);
+        SetEndOfFile(h);
+        sz.QuadPart = 0;
+    } else {
+        SetFilePointer(h, 0, nullptr, FILE_END);
+    }
+    DWORD written = 0;
+    if (sz.QuadPart == 0) {
+        const unsigned char bom[3] = { 0xEF, 0xBB, 0xBF };   // UTF-8 BOM，记事本能正确显示中文
+        WriteFile(h, bom, 3, &written, nullptr);
+    }
+    SYSTEMTIME st{};
+    GetLocalTime(&st);
+    wchar_t head[64];
+    wsprintfW(head, L"[%04d-%02d-%02d %02d:%02d:%02d] ", st.wYear, st.wMonth, st.wDay, st.wHour, st.wMinute, st.wSecond);
+    const std::wstring line = std::wstring(head) + msg + L"\r\n";
+    const int need = WideCharToMultiByte(CP_UTF8, 0, line.c_str(), -1, nullptr, 0, nullptr, nullptr);
+    if (need > 1) {
+        std::string utf8(static_cast<size_t>(need), '\0');
+        WideCharToMultiByte(CP_UTF8, 0, line.c_str(), -1, &utf8[0], need, nullptr, nullptr);
+        WriteFile(h, utf8.data(), static_cast<DWORD>(need - 1), &written, nullptr);
+    }
+    CloseHandle(h);
+}
+
+void reinstallInputHooks() {
+    if (g_mouseHook) { UnhookWindowsHookEx(g_mouseHook); g_mouseHook = nullptr; }
+    if (g_kbdHook)   { UnhookWindowsHookEx(g_kbdHook);   g_kbdHook = nullptr; }
+    HINSTANCE inst = GetModuleHandleW(nullptr);
+    g_mouseHook = SetWindowsHookEx(WH_MOUSE_LL, lowLevelMouseProc, inst, 0);
+    g_kbdHook   = SetWindowsHookEx(WH_KEYBOARD_LL, lowLevelKeyboardProc, inst, 0);
+    g_lastMouseHookTick = GetTickCount64();
+}
+
+void watchdogTick() {
+    static POINT s_prevPos = { LONG_MIN, LONG_MIN };
+    static ULONGLONG s_prevTick = 0;
+    static int s_missed = 0;
+    static ULONGLONG s_lastFix = 0;
+    static ULONGLONG s_interval = 3000;
+    static int s_fixCount = 0;
+    const ULONGLONG now = GetTickCount64();
+
+    // ---- A) 覆盖窗口是否被别的置顶窗口盖住？ ----
+    if (g_overlay) {
+        const DWORD myPid = GetCurrentProcessId();
+        HWND coverWnd = nullptr;
+        bool lostTopmost = (GetWindowLongPtrW(g_overlay, GWL_EXSTYLE) & WS_EX_TOPMOST) == 0;
+        int guard = 0;
+        for (HWND w = GetTopWindow(nullptr); w && w != g_overlay && guard < 600; w = GetWindow(w, GW_HWNDNEXT), ++guard) {
+            if (!IsWindowVisible(w)) continue;
+            DWORD pid = 0;
+            GetWindowThreadProcessId(w, &pid);
+            if (pid == myPid) continue;                                   // 自己的窗口（设置窗口等）不算
+            const LONG_PTR ex = GetWindowLongPtrW(w, GWL_EXSTYLE);
+            if (!(ex & WS_EX_TOPMOST)) continue;                          // 只关心同样置顶、却排在我们前面的窗口
+            if (ex & WS_EX_TRANSPARENT) continue;                         // 别的“鼠标穿透”覆盖层不算，避免互相抢
+            coverWnd = w;
+            break;
+        }
+        if (coverWnd || lostTopmost) {
+            SetWindowPos(g_overlay, HWND_TOPMOST, 0, 0, 0, 0,
+                         SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+            if (g_settingsWnd && IsWindowVisible(g_settingsWnd)) {         // 设置窗口保持在特效层之上，方便操作
+                SetWindowPos(g_settingsWnd, HWND_TOPMOST, 0, 0, 0, 0,
+                             SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+            }
+            if (coverWnd) {
+                wchar_t cls[128] = L"?";
+                GetClassNameW(coverWnd, cls, 128);
+                watchdogLog(std::wstring(L"覆盖窗口被置顶窗口盖住，已重新置顶。盖住它的窗口类名: ") + cls);
+            } else {
+                watchdogLog(L"覆盖窗口丢失置顶状态，已重新置顶");
+            }
+        }
+    }
+
+    // ---- B) 鼠标钩子是否还活着？ ----
+    POINT cur{};
+    if (GetCursorPos(&cur)) {
+        const bool moved = (cur.x != s_prevPos.x || cur.y != s_prevPos.y);
+        if (s_prevTick != 0 && moved) {
+            // 过去这个检测周期里鼠标动过：钩子应该至少收到过一个事件；一个都没有，就记一次“失联”
+            if (g_lastMouseHookTick < s_prevTick) ++s_missed; else s_missed = 0;
+        }
+        s_prevPos = cur;
+        s_prevTick = now;
+        if (s_missed >= 2 && now - s_lastFix >= s_interval) {
+            // 若刚重装过又失联，说明不是钩子被摘（可能是在管理员权限窗口上，系统本来就不给我们事件），拉长重试间隔避免反复折腾
+            if (s_lastFix != 0 && now - s_lastFix < 15000) {
+                s_interval = s_interval * 2;
+                if (s_interval > 30000) s_interval = 30000;
+            } else {
+                s_interval = 3000;
+            }
+            s_lastFix = now;
+            s_missed = 0;
+            reinstallInputHooks();
+            ++s_fixCount;
+            watchdogLog(L"鼠标在动但钩子收不到事件，已自动重装钩子（累计第 " + std::to_wstring(s_fixCount) + L" 次）");
+        }
+    }
+}
+
 LRESULT CALLBACK overlayWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
     switch (msg) {
     case WM_CREATE:
         addTrayIcon(hwnd);
         SetTimer(hwnd, kFrameTimerId, kFrameMs, nullptr);
+        SetTimer(hwnd, kWatchdogTimerId, kWatchdogMs, nullptr);
         return 0;
 
     case WM_RIPPLE_CLICK: {
@@ -3848,6 +3982,10 @@ LRESULT CALLBACK overlayWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
     }
 
     case WM_TIMER:
+        if (wParam == kWatchdogTimerId) {
+            watchdogTick();
+            return 0;
+        }
         if (wParam == kFrameTimerId) {
             const ULONGLONG now = GetTickCount64();
             const ULONGLONG maxDuration = static_cast<ULONGLONG>(g_config.durationMs + 60);
@@ -3936,6 +4074,7 @@ LRESULT CALLBACK overlayWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
 
     case WM_DESTROY:
         KillTimer(hwnd, kFrameTimerId);
+        KillTimer(hwnd, kWatchdogTimerId);
         removeTrayIcon(hwnd);
         if (g_settingsWnd) {
             DestroyWindow(g_settingsWnd);
