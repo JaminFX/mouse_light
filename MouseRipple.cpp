@@ -47,9 +47,6 @@ constexpr UINT ID_TRAY_AUTOSTART = 1002;
 constexpr UINT ID_TRAY_EXIT      = 1003;
 
 // Settings control IDs
-#ifndef CB_SETMINVISIBLE
-#define CB_SETMINVISIBLE 0x1701
-#endif
 constexpr int IDC_PRESET_COMBO        = 2001;
 constexpr int IDC_BTN_COLOR_LEFT      = 2002;
 constexpr int IDC_BTN_COLOR_RIGHT     = 2003;
@@ -3312,14 +3309,13 @@ LRESULT CALLBACK settingsWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPar
 
         HWND hCombo = CreateWindowExW(0, L"COMBOBOX", L"",
                                       WS_CHILD | WS_VISIBLE | CBS_DROPDOWNLIST | WS_TABSTOP,
-                                      30, 30, 360, 640, hwnd, (HMENU)(INT_PTR)IDC_PRESET_COMBO, g_instance, nullptr);
+                                      30, 30, 360, 900, hwnd, (HMENU)(INT_PTR)IDC_PRESET_COMBO, g_instance, nullptr);
         SendMessageW(hCombo, CB_ADDSTRING, 0, (LPARAM)L"✨ Wacom 细腻笔触风格 (推荐: 小巧/灵动/触点)");
         SendMessageW(hCombo, CB_ADDSTRING, 0, (LPARAM)L"🌊 经典水波涟漪风格 (大半径/多层扩散/悠长)");
         for (int i = 0; i < kThemeCount; ++i) {
             SendMessageW(hCombo, CB_ADDSTRING, 0, (LPARAM)kThemes[i].name);
         }
         SendMessageW(hCombo, CB_ADDSTRING, 0, (LPARAM)L"🛠️ 自定义参数 (自由调节)");
-        SendMessageW(hCombo, CB_SETMINVISIBLE, 64, 0);   // 尽量一次显示全部预设（屏幕放不下时自动截断）
 
         // 2. Click Ripples GroupBox
         CreateWindowExW(0, L"BUTTON", L" 点击波纹色彩与动态 ",
@@ -3618,24 +3614,6 @@ LRESULT CALLBACK settingsWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPar
         const int id = LOWORD(wParam);
         const int code = HIWORD(wParam);
 
-        if (id == IDC_PRESET_COMBO && code == CBN_DROPDOWN) {
-            HWND hCb = GetDlgItem(hwnd, IDC_PRESET_COMBO);
-            const int cnt = (int)SendMessageW(hCb, CB_GETCOUNT, 0, 0);
-            const int itemH = (int)SendMessageW(hCb, CB_GETITEMHEIGHT, 0, 0);
-            const int fieldH = (int)SendMessageW(hCb, CB_GETITEMHEIGHT, (WPARAM)-1, 0);
-            if (cnt > 0 && itemH > 0) {
-                RECT rc{};
-                GetWindowRect(hCb, &rc);
-                MONITORINFO mi{};
-                mi.cbSize = sizeof(mi);
-                GetMonitorInfoW(MonitorFromWindow(hCb, MONITOR_DEFAULTTONEAREST), &mi);
-                const int maxH = (mi.rcWork.bottom - mi.rcWork.top) - 16;          // 不超过屏幕可用高度
-                int wantH = fieldH + itemH * cnt + 10;                              // 选择框 + 全部列表项
-                if (wantH > maxH) wantH = maxH;
-                SetWindowPos(hCb, nullptr, 0, 0, rc.right - rc.left, wantH,
-                             SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
-            }
-        }
         if (id == IDC_PRESET_COMBO && code == CBN_SELCHANGE) {
             const int selIdx = (int)SendDlgItemMessageW(hwnd, IDC_PRESET_COMBO, CB_GETCURSEL, 0, 0);
             const int sel = (selIdx >= 0) ? comboIndexToPreset(selIdx) : -1;
@@ -3900,10 +3878,22 @@ void watchdogTick() {
     static ULONGLONG s_lastFix = 0;
     static ULONGLONG s_interval = 3000;
     static int s_fixCount = 0;
+    static ULONGLONG s_lastRaise = 0;
     const ULONGLONG now = GetTickCount64();
 
     // ---- A) 覆盖窗口是否被别的置顶窗口盖住？ ----
-    if (g_overlay) {
+    // 用户正在操作本程序自己的界面（设置窗口、下拉列表、托盘菜单）时，不动任何窗口层级，
+    // 否则会把刚展开的下拉列表“顶掉”，表现为菜单展开不了。
+    bool ownUiActive = (g_settingsWnd && IsWindowVisible(g_settingsWnd));
+    if (!ownUiActive) {
+        HWND fg = GetForegroundWindow();
+        if (fg) {
+            DWORD fgPid = 0;
+            GetWindowThreadProcessId(fg, &fgPid);
+            if (fgPid == GetCurrentProcessId()) ownUiActive = true;
+        }
+    }
+    if (g_overlay && !ownUiActive && (s_lastRaise == 0 || now - s_lastRaise >= 2000)) {
         const DWORD myPid = GetCurrentProcessId();
         HWND coverWnd = nullptr;
         bool lostTopmost = (GetWindowLongPtrW(g_overlay, GWL_EXSTYLE) & WS_EX_TOPMOST) == 0;
@@ -3920,12 +3910,9 @@ void watchdogTick() {
             break;
         }
         if (coverWnd || lostTopmost) {
+            s_lastRaise = now;                                             // 最多每 2 秒重新置顶一次
             SetWindowPos(g_overlay, HWND_TOPMOST, 0, 0, 0, 0,
                          SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
-            if (g_settingsWnd && IsWindowVisible(g_settingsWnd)) {         // 设置窗口保持在特效层之上，方便操作
-                SetWindowPos(g_settingsWnd, HWND_TOPMOST, 0, 0, 0, 0,
-                             SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
-            }
             if (coverWnd) {
                 wchar_t cls[128] = L"?";
                 GetClassNameW(coverWnd, cls, 128);
